@@ -1,0 +1,16 @@
+Important working rules:
+- Use plain PHP (no frameworks like Laravel or Symfony)
+- Use MySQL for storage
+- Use vanilla HTML, CSS, and JavaScript only
+- No build process
+- No Node, no React, no Vue
+- Keep everything simple, readable, and deployable as static PHP files
+- Use prepared statements for all DB access
+- Do not invent APIs that may not exist
+- Clearly separate:
+  - raw source data
+  - normalized data
+  - derived metrics
+  - generated summaries
+- Handle partial failures gracefully
+- Favor deterministic logic over vague AI behavior
