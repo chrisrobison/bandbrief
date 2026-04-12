@@ -1,0 +1,72 @@
+{
+  "ok": true,
+  "data": {
+    "report_id": 42,
+    "artist_id": 7,
+    "status": "partial",
+    "cached": false,
+    "report": {
+      "generated_at": "2026-04-12T16:20:00+00:00",
+      "normalized_profile": {
+        "requested_name": "Khruangbin",
+        "canonical_name": "Khruangbin",
+        "description": "American musical trio from Houston, Texas.",
+        "official_website": "https://www.khruangbin.com"
+      },
+      "platform_presence": {
+        "spotify": {
+          "available": true,
+          "url": "https://open.spotify.com/artist/..."
+        },
+        "lastfm": {
+          "available": true,
+          "url": "https://www.last.fm/music/Khruangbin"
+        },
+        "wikipedia": {
+          "available": true,
+          "url": "https://en.wikipedia.org/wiki/Khruangbin"
+        },
+        "reddit": {
+          "available": true,
+          "url": "https://www.reddit.com/search/?q=Khruangbin"
+        },
+        "bandcamp": {
+          "available": false,
+          "url": ""
+        },
+        "official_website": {
+          "available": true,
+          "url": "https://www.khruangbin.com"
+        }
+      },
+      "releases": [],
+      "engagement": {
+        "spotify_popularity": 62,
+        "lastfm_playcount": 421330,
+        "reddit_total_upvotes": 718
+      },
+      "community_signal": {
+        "mentions_total": 21,
+        "subreddits_count": 9,
+        "mentions": []
+      },
+      "live_activity": {
+        "status": "missing",
+        "note": "No live event source is integrated in the MVP yet."
+      },
+      "bandbrief_score": 68,
+      "score_breakdown": [],
+      "booking_take": "Moderate booking signal: viable for targeted rooms and support slots; verify missing sources before committing spend.",
+      "missing_data": [
+        "bandcamp"
+      ],
+      "sections": []
+    }
+  },
+  "meta": {
+    "requested_name": "Khruangbin",
+    "force": false,
+    "resource": "reports",
+    "action": "create"
+  }
+}

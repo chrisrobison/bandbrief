@@ -1,0 +1,15 @@
+{
+  "ok": true,
+  "data": {
+    "report_id": 42,
+    "artist_id": 7,
+    "status": "partial",
+    "cached": false
+  },
+  "meta": {
+    "requested_name": "Khruangbin",
+    "force": false,
+    "resource": "reports",
+    "action": "create"
+  }
+}

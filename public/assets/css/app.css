@@ -1,0 +1,136 @@
+:root {
+  --bg-0: #f2efe8;
+  --bg-1: #fffdf7;
+  --text-0: #1f2428;
+  --text-1: #545f67;
+  --line: #d7d1c7;
+  --brand: #0f6e8b;
+  --brand-soft: #d6edf4;
+  --ok: #12754f;
+  --warn: #b8651a;
+  --err: #b42318;
+  --radius: 14px;
+  --shadow: 0 12px 34px rgba(31, 36, 40, 0.08);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+  color: var(--text-0);
+  background:
+    radial-gradient(circle at 0% 0%, rgba(15, 110, 139, 0.14), transparent 40%),
+    radial-gradient(circle at 100% 0%, rgba(253, 148, 44, 0.14), transparent 38%),
+    linear-gradient(160deg, var(--bg-0), var(--bg-1));
+}
+
+.app-shell {
+  width: min(1100px, 92vw);
+  margin: 3rem auto;
+  display: grid;
+  gap: 1rem;
+}
+
+.hero {
+  background: linear-gradient(115deg, #fff9ee, #f6fbff);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 1.5rem;
+}
+
+.hero h1 {
+  margin: 0;
+  font-family: "Space Grotesk", "Avenir Next", sans-serif;
+  letter-spacing: -0.03em;
+  font-size: clamp(1.75rem, 2.5vw, 2.4rem);
+}
+
+.hero p {
+  margin: 0.5rem 0 0;
+  color: var(--text-1);
+}
+
+.panel {
+  background: rgba(255, 255, 255, 0.88);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 1rem;
+}
+
+.report-section {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.9rem;
+  background: #fff;
+}
+
+.report-section + .report-section {
+  margin-top: 0.75rem;
+}
+
+.muted {
+  color: var(--text-1);
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.78rem;
+  padding: 0.2rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: #fff;
+}
+
+.status-ok {
+  color: var(--ok);
+  border-color: rgba(18, 117, 79, 0.35);
+  background: rgba(18, 117, 79, 0.08);
+}
+
+.status-partial {
+  color: var(--warn);
+  border-color: rgba(184, 101, 26, 0.35);
+  background: rgba(184, 101, 26, 0.09);
+}
+
+.status-error {
+  color: var(--err);
+  border-color: rgba(180, 35, 24, 0.35);
+  background: rgba(180, 35, 24, 0.09);
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.panel {
+  animation: fadeInUp 280ms ease;
+}
+
+@media (max-width: 840px) {
+  .app-shell {
+    width: min(100%, 95vw);
+    margin: 1.1rem auto 2rem;
+    gap: 0.8rem;
+  }
+
+  .panel,
+  .hero {
+    padding: 0.85rem;
+  }
+}

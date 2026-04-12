@@ -17,22 +17,23 @@ final class Db
             return self::$pdo;
         }
 
+        /** @var array{db: array<string, mixed>} $config */
         $config = require __DIR__ . '/../Config/config.php';
         $db = $config['db'];
 
         $dsn = sprintf(
             'mysql:host=%s;port=%d;dbname=%s;charset=%s',
-            $db['host'],
-            $db['port'],
-            $db['name'],
-            $db['charset']
+            (string) $db['host'],
+            (int) $db['port'],
+            (string) $db['name'],
+            (string) $db['charset']
         );
 
         try {
             self::$pdo = new PDO(
                 $dsn,
-                $db['user'],
-                $db['pass'],
+                (string) $db['user'],
+                (string) $db['pass'],
                 [
                     PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
                     PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,

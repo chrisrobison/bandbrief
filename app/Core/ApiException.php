@@ -11,7 +11,7 @@ final class ApiException extends RuntimeException
     private string $errorCode;
     private int $httpStatus;
 
-    public function __construct(string $message, string $errorCode = 'bad_request', int $httpStatus = 400)
+    public function __construct(string $message, string $errorCode, int $httpStatus = 400)
     {
         parent::__construct($message);
         $this->errorCode = $errorCode;
