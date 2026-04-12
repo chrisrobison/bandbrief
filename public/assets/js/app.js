@@ -23,10 +23,11 @@ LARC.on("bb:search:submitted", async ({ detail }) => {
     const envelope = await createReport(query, false);
     const data = envelope.data || {};
 
-    setState({ loading: false, report: data, error: null });
+    setState({ loading: false, report: data, error: null, envelope });
     LARC.emit("bb:report:loaded", {
       query,
       report: data,
+      envelope,
       meta: envelope.meta || {},
     });
   } catch (error) {

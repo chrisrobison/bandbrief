@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Repositories;
 
+use DateTimeImmutable;
+use Exception;
 use PDO;
 
 final class ReportRepository
@@ -35,6 +37,8 @@ final class ReportRepository
 
     /**
      * @param array<string, mixed> $payload
+     * @param array<int, array<string, mixed>> $errors
+     * @param array<string, mixed> $rawPayload
      */
     public function saveSourceSnapshot(
         int $runId,
@@ -43,17 +47,59 @@ final class ReportRepository
         string $status,
         float $confidence,
         string $collectionMethod,
-        array $payload
+        array $payload,
+        string $fetchedAt = '',
+        array $errors = [],
+        array $rawPayload = [],
+        string $sourceRole = 'identity'
     ): void {
-        $stmt = $this->pdo->prepare('INSERT INTO source_snapshots (ingestion_run_id, artist_id, source, status, confidence, collection_method, payload_json, fetched_at, created_at)
-                                     VALUES (:ingestion_run_id, :artist_id, :source, :status, :confidence, :collection_method, :payload_json, NOW(), NOW())');
+        $sql = 'INSERT INTO source_snapshots (
+                    ingestion_run_id,
+                    artist_id,
+                    source,
+                    source_role,
+                    status,
+                    confidence,
+                    collection_method,
+                    payload_json,
+                    raw_payload_json,
+                    errors_json,
+                    fetched_at,
+                    created_at
+                ) VALUES (
+                    :ingestion_run_id,
+                    :artist_id,
+                    :source,
+                    :source_role,
+                    :status,
+                    :confidence,
+                    :collection_method,
+                    :payload_json,
+                    :raw_payload_json,
+                    :errors_json,
+                    :fetched_at,
+                    NOW()
+                )';
+
+        $stmt = $this->pdo->prepare($sql);
         $stmt->bindValue(':ingestion_run_id', $runId, PDO::PARAM_INT);
         $stmt->bindValue(':artist_id', $artistId, PDO::PARAM_INT);
         $stmt->bindValue(':source', $source, PDO::PARAM_STR);
+        $stmt->bindValue(':source_role', $sourceRole, PDO::PARAM_STR);
         $stmt->bindValue(':status', $status, PDO::PARAM_STR);
         $stmt->bindValue(':confidence', $confidence);
         $stmt->bindValue(':collection_method', $collectionMethod, PDO::PARAM_STR);
         $stmt->bindValue(':payload_json', json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE), PDO::PARAM_STR);
+        $stmt->bindValue(':raw_payload_json', json_encode($rawPayload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE), PDO::PARAM_STR);
+        $stmt->bindValue(':errors_json', json_encode($errors, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE), PDO::PARAM_STR);
+
+        $normalizedFetchedAt = $this->normalizeSqlDatetime($fetchedAt);
+        $stmt->bindValue(
+            ':fetched_at',
+            $normalizedFetchedAt,
+            $normalizedFetchedAt !== null ? PDO::PARAM_STR : PDO::PARAM_NULL
+        );
+
         $stmt->execute();
     }
 
@@ -187,5 +233,20 @@ final class ReportRepository
         $row = $stmt->fetch();
 
         return is_array($row) ? $row : null;
+    }
+
+    private function normalizeSqlDatetime(string $value): ?string
+    {
+        $trimmed = trim($value);
+        if ($trimmed === '') {
+            return null;
+        }
+
+        try {
+            $date = new DateTimeImmutable($trimmed);
+            return $date->format('Y-m-d H:i:s');
+        } catch (Exception $e) {
+            return null;
+        }
     }
 }

@@ -1,0 +1,26 @@
+{
+  "ingestion_run_id": 123,
+  "artist_id": 88,
+  "source": "musicbrainz",
+  "source_role": "identity",
+  "status": "partial",
+  "confidence": 0.84,
+  "collection_method": "official_api",
+  "fetched_at": "2026-04-12T17:12:34Z",
+  "payload_json": {
+    "profile": {
+      "external_id": "8e57c2f7-3db6-4f44-b69a-0948ac5f729f",
+      "name": "Khruangbin"
+    },
+    "aliases": ["Khruang Bin"],
+    "releases": []
+  },
+  "raw_payload_json": {},
+  "errors_json": [
+    {
+      "code": "source_partial",
+      "message": "MusicBrainz returned closely scored artist candidates; identity should be treated as ambiguous.",
+      "context": {}
+    }
+  ]
+}

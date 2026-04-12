@@ -39,6 +39,7 @@ final class ReportsApi extends ApiBase
         return $this->ok($result, [
             'requested_name' => $name,
             'force' => $force,
+            'source_status' => is_array($result['source_status'] ?? null) ? $result['source_status'] : [],
         ]);
     }
 

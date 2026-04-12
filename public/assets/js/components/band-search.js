@@ -14,7 +14,7 @@ class BandSearch extends HTMLElement {
           <input id="bandbrief-input" name="name" placeholder="e.g. Khruangbin" required />
           <button type="submit">Generate Brief</button>
         </div>
-        <p class="muted">BandBrief calls Spotify, Last.fm, Wikipedia, Reddit, Bandcamp, and official website discovery.</p>
+        <p class="muted">BandBrief runs explicit identity checks across MusicBrainz, Spotify, Last.fm, Wikipedia, and Bandcamp, then enriches with Reddit signal data.</p>
       </form>
       <style>
         .band-search-form { display: grid; gap: 0.65rem; }

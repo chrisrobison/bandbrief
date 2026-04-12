@@ -29,5 +29,8 @@ return [
         'bandcamp' => [
             'enabled' => (getenv('BANDCAMP_ENABLED') ?: '1') === '1',
         ],
+        'musicbrainz' => [
+            'user_agent' => getenv('MUSICBRAINZ_USER_AGENT') ?: 'BandBrief/1.0 (+https://yourdomain.example/contact)',
+        ],
     ],
 ];

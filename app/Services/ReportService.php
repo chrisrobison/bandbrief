@@ -6,18 +6,20 @@ namespace App\Services;
 
 use App\Adapters\BandcampAdapter;
 use App\Adapters\LastfmAdapter;
+use App\Adapters\MusicbrainzAdapter;
 use App\Adapters\RedditAdapter;
 use App\Adapters\SpotifyAdapter;
 use App\Adapters\WikipediaAdapter;
-use App\Core\Db;
 use App\Core\ApiException;
+use App\Core\Db;
+use App\Reporting\ReportBuilder;
 use App\Repositories\ArtistRepository;
 use App\Repositories\ReportRepository;
-use App\Reporting\ReportBuilder;
 use App\Scoring\Scorer;
 use App\Support\HttpClient;
 use DateInterval;
 use DateTimeImmutable;
+use DateTimeZone;
 use Exception;
 
 final class ReportService
@@ -27,6 +29,7 @@ final class ReportService
     private Resolver $resolver;
     private Scorer $scorer;
     private ReportBuilder $reportBuilder;
+    private MusicbrainzAdapter $musicbrainzAdapter;
     private SpotifyAdapter $spotifyAdapter;
     private LastfmAdapter $lastfmAdapter;
     private WikipediaAdapter $wikipediaAdapter;
@@ -46,6 +49,7 @@ final class ReportService
         $config = require __DIR__ . '/../Config/config.php';
         $http = new HttpClient();
 
+        $this->musicbrainzAdapter = new MusicbrainzAdapter($http, (array) ($config['sources']['musicbrainz'] ?? []));
         $this->spotifyAdapter = new SpotifyAdapter($http, (array) ($config['sources']['spotify'] ?? []));
         $this->lastfmAdapter = new LastfmAdapter($http, (array) ($config['sources']['lastfm'] ?? []));
         $this->wikipediaAdapter = new WikipediaAdapter($http, []);
@@ -73,81 +77,44 @@ final class ReportService
                     'status' => (string) ($cached['status'] ?? 'complete'),
                     'cached' => true,
                     'report' => $cached['report'],
+                    'source_status' => (is_array($cached['report']['source_status'] ?? null) ? $cached['report']['source_status'] : []),
                 ];
             }
         }
 
-        $sources = $this->collectSources($requestedName);
-        $identity = $this->resolver->resolve($requestedName, $sources);
+        $identitySources = $this->collectIdentitySources($requestedName);
+        $signalSources = $this->collectSignalSources($requestedName);
+
+        $identity = $this->resolver->resolve($requestedName, $identitySources);
         $canonicalName = (string) ($identity['canonical_name'] ?? $requestedName);
+
         $artistId = $this->artistRepository->upsertArtist(
             $canonicalName,
             $canonicalName,
             (float) ($identity['confidence'] ?? 0.0),
             [
                 'requested_name' => $requestedName,
-                'match_type' => (string) ($identity['match_type'] ?? 'unresolved'),
+                'match_type' => (string) ($identity['match_type'] ?? 'no_trustworthy_match'),
                 'resolution_explanation' => (string) ($identity['explanation'] ?? ''),
+                'resolution_detail' => $identity['explainability'] ?? [],
             ]
         );
 
         $runId = $this->reportRepository->startIngestionRun($artistId);
 
-        foreach ($sources as $sourceName => $sourceData) {
-            $this->reportRepository->saveSourceSnapshot(
-                $runId,
-                $artistId,
-                $sourceName,
-                (string) ($sourceData['status'] ?? 'error'),
-                (float) ($sourceData['confidence'] ?? 0.0),
-                (string) ($sourceData['collection_method'] ?? 'unknown'),
-                is_array($sourceData['payload'] ?? null) ? $sourceData['payload'] : []
-            );
+        $this->persistSourceSnapshots($runId, $artistId, $identitySources, 'identity');
+        $this->persistSourceSnapshots($runId, $artistId, $signalSources, 'signal');
+        $this->persistIdentityProfiles($artistId, $requestedName, $identitySources);
 
-            $errors = $sourceData['errors'] ?? [];
-            if (is_array($errors)) {
-                foreach ($errors as $error) {
-                    if (!is_string($error)) {
-                        continue;
-                    }
-                    $this->reportRepository->saveSourceError(
-                        $runId,
-                        $artistId,
-                        (string) $sourceName,
-                        'source_partial',
-                        $error,
-                        []
-                    );
-                }
-            }
-
-            $profile = $sourceData['payload']['profile'] ?? [];
-            if (is_array($profile)) {
-                $aliasName = trim((string) ($profile['name'] ?? ''));
-                if ($aliasName !== '') {
-                    $this->artistRepository->saveAlias($artistId, $aliasName, (string) $sourceName, (float) ($sourceData['confidence'] ?? 0.0));
-                }
-
-                $url = trim((string) ($profile['url'] ?? ''));
-                if ($url !== '' || $aliasName !== '') {
-                    $externalId = (string) ($profile['external_id'] ?? $aliasName ?: $requestedName);
-                    $this->artistRepository->saveExternalProfile(
-                        $artistId,
-                        (string) $sourceName,
-                        $externalId,
-                        $url,
-                        $aliasName,
-                        $profile
-                    );
-                }
-            }
-        }
-
-        $normalized = $this->normalize($requestedName, $identity, $sources);
+        $normalized = $this->normalize($requestedName, $identity, $identitySources, $signalSources);
         $score = $this->scorer->score($normalized);
         $report = $this->reportBuilder->build($normalized, $score);
 
-        $status = count($normalized['missing_data']) > 0 ? 'partial' : 'complete';
+        $status = 'complete';
+        if (count($normalized['missing_data']) > 0 || in_array((string) ($identity['match_type'] ?? ''), ['ambiguous_match', 'no_trustworthy_match'], true)) {
+            $status = 'partial';
+        }
+
         $reportId = $this->reportRepository->saveReport(
             $artistId,
             $runId,
@@ -172,6 +139,8 @@ final class ReportService
             'status' => $status,
             'cached' => false,
             'report' => $report,
+            'source_status' => $normalized['source_status'],
+            'identity' => $identity,
         ];
     }
 
@@ -193,6 +162,7 @@ final class ReportService
             'confidence' => (float) $row['confidence'],
             'created_at' => (string) $row['created_at'],
             'report' => $row['report'],
+            'source_status' => (is_array($row['report']['source_status'] ?? null) ? $row['report']['source_status'] : []),
         ];
     }
 
@@ -209,52 +179,169 @@ final class ReportService
     /**
      * @return array<string, array<string, mixed>>
      */
-    private function collectSources(string $artistName): array
+    private function collectIdentitySources(string $artistName): array
     {
         return [
+            'musicbrainz' => $this->musicbrainzAdapter->fetchArtist($artistName),
             'spotify' => $this->spotifyAdapter->fetchArtist($artistName),
             'lastfm' => $this->lastfmAdapter->fetchArtist($artistName),
             'wikipedia' => $this->wikipediaAdapter->fetchArtist($artistName),
-            'reddit' => $this->redditAdapter->fetchArtist($artistName),
             'bandcamp' => $this->bandcampAdapter->fetchArtist($artistName),
         ];
     }
 
     /**
-     * @param array<string, mixed> $identity
+     * @return array<string, array<string, mixed>>
+     */
+    private function collectSignalSources(string $artistName): array
+    {
+        return [
+            'reddit' => $this->redditAdapter->fetchArtist($artistName),
+        ];
+    }
+
+    /**
      * @param array<string, array<string, mixed>> $sources
+     */
+    private function persistSourceSnapshots(int $runId, int $artistId, array $sources, string $role): void
+    {
+        foreach ($sources as $sourceName => $sourceData) {
+            $errors = $this->normalizeSourceErrors($sourceData);
+            $errorRows = [];
+
+            foreach ($errors as $error) {
+                if (!is_array($error)) {
+                    continue;
+                }
+
+                $errorRows[] = [
+                    'code' => (string) ($error['code'] ?? 'source_error'),
+                    'message' => (string) ($error['message'] ?? 'Source returned an unspecified error'),
+                    'context' => (array) ($error['context'] ?? []),
+                ];
+            }
+
+            $this->reportRepository->saveSourceSnapshot(
+                $runId,
+                $artistId,
+                (string) $sourceName,
+                (string) ($sourceData['status'] ?? 'error'),
+                (float) ($sourceData['confidence'] ?? 0.0),
+                (string) ($sourceData['collection_method'] ?? 'unknown'),
+                is_array($sourceData['payload'] ?? null) ? $sourceData['payload'] : [],
+                (string) ($sourceData['fetched_at'] ?? ''),
+                $errorRows,
+                is_array($sourceData['raw_payload'] ?? null) ? $sourceData['raw_payload'] : [],
+                $role
+            );
+
+            foreach ($errorRows as $error) {
+                $this->reportRepository->saveSourceError(
+                    $runId,
+                    $artistId,
+                    (string) $sourceName,
+                    (string) ($error['code'] ?? 'source_error'),
+                    (string) ($error['message'] ?? 'Source returned an unspecified error'),
+                    is_array($error['context'] ?? null) ? $error['context'] : []
+                );
+            }
+        }
+    }
+
+    /**
+     * @param array<string, array<string, mixed>> $identitySources
+     */
+    private function persistIdentityProfiles(int $artistId, string $requestedName, array $identitySources): void
+    {
+        foreach ($identitySources as $sourceName => $sourceData) {
+            $profile = $sourceData['payload']['profile'] ?? [];
+            if (!is_array($profile)) {
+                continue;
+            }
+
+            $sourceConfidence = (float) ($sourceData['confidence'] ?? 0.0);
+            $aliasName = trim((string) ($profile['name'] ?? ''));
+            if ($aliasName !== '') {
+                $this->artistRepository->saveAlias($artistId, $aliasName, (string) $sourceName, $sourceConfidence);
+            }
+
+            $payloadAliases = $sourceData['payload']['aliases'] ?? [];
+            if (is_array($payloadAliases)) {
+                foreach ($payloadAliases as $aliasValue) {
+                    $alias = trim((string) $aliasValue);
+                    if ($alias === '') {
+                        continue;
+                    }
+                    $this->artistRepository->saveAlias($artistId, $alias, (string) $sourceName, max(0.45, $sourceConfidence * 0.92));
+                }
+            }
+
+            $url = trim((string) ($profile['url'] ?? ''));
+            if ($url !== '' || $aliasName !== '') {
+                $externalId = (string) ($profile['external_id'] ?? $aliasName ?: $requestedName);
+                $this->artistRepository->saveExternalProfile(
+                    $artistId,
+                    (string) $sourceName,
+                    $externalId,
+                    $url,
+                    $aliasName,
+                    $profile
+                );
+            }
+        }
+    }
+
+    /**
+     * @param array<string, mixed> $identity
+     * @param array<string, array<string, mixed>> $identitySources
+     * @param array<string, array<string, mixed>> $signalSources
      * @return array<string, mixed>
      */
-    private function normalize(string $requestedName, array $identity, array $sources): array
+    private function normalize(string $requestedName, array $identity, array $identitySources, array $signalSources): array
     {
-        $spotifyProfile = $this->sourceProfile($sources, 'spotify');
-        $lastfmProfile = $this->sourceProfile($sources, 'lastfm');
-        $wikiProfile = $this->sourceProfile($sources, 'wikipedia');
-        $bandcampProfile = $this->sourceProfile($sources, 'bandcamp');
-        $redditPayload = $sources['reddit']['payload'] ?? [];
+        $spotifyProfile = $this->sourceProfile($identitySources, 'spotify');
+        $lastfmProfile = $this->sourceProfile($identitySources, 'lastfm');
+        $wikiProfile = $this->sourceProfile($identitySources, 'wikipedia');
+        $bandcampProfile = $this->sourceProfile($identitySources, 'bandcamp');
+        $musicbrainzProfile = $this->sourceProfile($identitySources, 'musicbrainz');
+
+        $redditPayload = $signalSources['reddit']['payload'] ?? [];
+        if (!is_array($redditPayload)) {
+            $redditPayload = [];
+        }
 
         $officialWebsite = trim((string) ($wikiProfile['official_website'] ?? ''));
+        if ($officialWebsite === '') {
+            $officialUrls = $musicbrainzProfile['official_urls'] ?? [];
+            if (is_array($officialUrls) && $officialUrls !== []) {
+                $officialWebsite = trim((string) $officialUrls[0]);
+            }
+        }
 
         $platformPresence = [
+            'musicbrainz' => [
+                'available' => $this->isAvailable($identitySources, 'musicbrainz'),
+                'url' => (string) ($musicbrainzProfile['url'] ?? ''),
+            ],
             'spotify' => [
-                'available' => $this->isAvailable($sources, 'spotify'),
+                'available' => $this->isAvailable($identitySources, 'spotify'),
                 'url' => (string) ($spotifyProfile['url'] ?? ''),
             ],
             'lastfm' => [
-                'available' => $this->isAvailable($sources, 'lastfm'),
+                'available' => $this->isAvailable($identitySources, 'lastfm'),
                 'url' => (string) ($lastfmProfile['url'] ?? ''),
             ],
             'wikipedia' => [
-                'available' => $this->isAvailable($sources, 'wikipedia'),
+                'available' => $this->isAvailable($identitySources, 'wikipedia'),
                 'url' => (string) ($wikiProfile['url'] ?? ''),
             ],
-            'reddit' => [
-                'available' => $this->isAvailable($sources, 'reddit'),
-                'url' => 'https://www.reddit.com/search/?q=' . rawurlencode($requestedName),
-            ],
             'bandcamp' => [
-                'available' => $this->isAvailable($sources, 'bandcamp'),
+                'available' => $this->isAvailable($identitySources, 'bandcamp'),
                 'url' => (string) ($bandcampProfile['url'] ?? ''),
+            ],
+            'reddit' => [
+                'available' => $this->isAvailable($signalSources, 'reddit'),
+                'url' => 'https://www.reddit.com/search/?q=' . rawurlencode($requestedName),
             ],
             'official_website' => [
                 'available' => $officialWebsite !== '',
@@ -262,25 +349,35 @@ final class ReportService
             ],
         ];
 
-        $sourceConfidences = [];
-        foreach ($sources as $sourceRow) {
-            $sourceConfidences[] = (float) ($sourceRow['confidence'] ?? 0.0);
+        $identitySourceConfidences = [];
+        foreach ($identitySources as $sourceRow) {
+            $identitySourceConfidences[] = (float) ($sourceRow['confidence'] ?? 0.0);
         }
 
-        $spotifyReleases = $sources['spotify']['payload']['releases'] ?? [];
+        $signalSourceConfidences = [];
+        foreach ($signalSources as $sourceRow) {
+            $signalSourceConfidences[] = (float) ($sourceRow['confidence'] ?? 0.0);
+        }
+
+        $spotifyReleases = $identitySources['spotify']['payload']['releases'] ?? [];
         if (!is_array($spotifyReleases)) {
             $spotifyReleases = [];
         }
 
-        $lastfmReleases = $sources['lastfm']['payload']['releases'] ?? [];
+        $lastfmReleases = $identitySources['lastfm']['payload']['releases'] ?? [];
         if (!is_array($lastfmReleases)) {
             $lastfmReleases = [];
         }
 
-        $releases = $this->mergeReleases($spotifyReleases, $lastfmReleases);
+        $musicbrainzReleases = $identitySources['musicbrainz']['payload']['releases'] ?? [];
+        if (!is_array($musicbrainzReleases)) {
+            $musicbrainzReleases = [];
+        }
+
+        $releases = $this->mergeReleases($spotifyReleases, $lastfmReleases, $musicbrainzReleases);
         $communityMentions = is_array($redditPayload['mentions'] ?? null) ? $redditPayload['mentions'] : [];
 
-        $now = new DateTimeImmutable('now', new \DateTimeZone('UTC'));
+        $now = new DateTimeImmutable('now', new DateTimeZone('UTC'));
         $cutoff12 = $now->sub(new DateInterval('P12M'));
         $cutoff24 = $now->sub(new DateInterval('P24M'));
         $cutoff90Days = $now->sub(new DateInterval('P90D'))->getTimestamp();
@@ -327,17 +424,24 @@ final class ReportService
         }
 
         $sourceMatches = $identity['source_matches'] ?? [];
-        $matchedSources = 0;
+        $matchedIdentitySources = 0;
         if (is_array($sourceMatches)) {
             foreach ($sourceMatches as $match) {
                 if (is_array($match) && (bool) ($match['matched'] ?? false)) {
-                    $matchedSources++;
+                    $matchedIdentitySources++;
                 }
             }
         }
 
         $missingData = [];
-        foreach ($sources as $sourceName => $sourceData) {
+        foreach ($identitySources as $sourceName => $sourceData) {
+            $status = (string) ($sourceData['status'] ?? 'error');
+            if ($status !== 'ok') {
+                $missingData[] = (string) $sourceName;
+            }
+        }
+
+        foreach ($signalSources as $sourceName => $sourceData) {
             $status = (string) ($sourceData['status'] ?? 'error');
             if ($status !== 'ok') {
                 $missingData[] = (string) $sourceName;
@@ -353,6 +457,10 @@ final class ReportService
             $lastfmTags = [];
         }
 
+        $sourceStatus = $this->buildSourceStatus($identitySources, $signalSources);
+        $identityAvailableCount = $this->availableCount($identitySources);
+        $signalAvailableCount = $this->availableCount($signalSources);
+
         return [
             'identity' => $identity,
             'profile' => [
@@ -360,16 +468,23 @@ final class ReportService
                 'canonical_name' => (string) ($identity['canonical_name'] ?? $requestedName),
                 'description' => (string) (($wikiProfile['extract'] ?? $wikiProfile['description'] ?? '') ?: ''),
                 'official_website' => $officialWebsite,
+                'aliases' => is_array($musicbrainzProfile['aliases'] ?? null) ? $musicbrainzProfile['aliases'] : [],
             ],
+            'source_groups' => [
+                'identity_sources' => $identitySources,
+                'signal_sources' => $signalSources,
+            ],
+            'source_status' => $sourceStatus,
             'platform_presence' => $platformPresence,
             'releases' => $releases,
-            'community_mentions' => array_slice($communityMentions, 0, 15),
+            'community_mentions' => array_slice($communityMentions, 0, 20),
             'availability' => [
-                'spotify' => $this->isAvailable($sources, 'spotify'),
-                'lastfm' => $this->isAvailable($sources, 'lastfm'),
-                'wikipedia' => $this->isAvailable($sources, 'wikipedia'),
-                'reddit' => $this->isAvailable($sources, 'reddit'),
-                'bandcamp' => $this->isAvailable($sources, 'bandcamp'),
+                'musicbrainz' => $this->isAvailable($identitySources, 'musicbrainz'),
+                'spotify' => $this->isAvailable($identitySources, 'spotify'),
+                'lastfm' => $this->isAvailable($identitySources, 'lastfm'),
+                'wikipedia' => $this->isAvailable($identitySources, 'wikipedia'),
+                'bandcamp' => $this->isAvailable($identitySources, 'bandcamp'),
+                'reddit' => $this->isAvailable($signalSources, 'reddit'),
                 'official_website' => $officialWebsite !== '',
             ],
             'missing_data' => array_values(array_unique($missingData)),
@@ -379,19 +494,28 @@ final class ReportService
                 'lastfm_listeners' => (int) ($lastfmProfile['listeners'] ?? 0),
                 'lastfm_playcount' => (int) ($lastfmProfile['playcount'] ?? 0),
                 'lastfm_tags_count' => count($lastfmTags),
-                'reddit_mentions_total' => (int) (($sources['reddit']['payload']['summary']['mentions_count'] ?? 0) ?: 0),
-                'reddit_subreddits_count' => (int) (($sources['reddit']['payload']['summary']['subreddits_count'] ?? 0) ?: 0),
+                'reddit_mentions_total' => (int) (($signalSources['reddit']['payload']['summary']['mentions_count'] ?? 0) ?: 0),
+                'reddit_subreddits_count' => (int) (($signalSources['reddit']['payload']['summary']['subreddits_count'] ?? 0) ?: 0),
                 'reddit_total_upvotes' => $totalUpvotes,
                 'reddit_mentions_90d' => $mentions90d,
                 'releases_last_12m' => $releasesLast12,
                 'releases_last_24m' => $releasesLast24,
                 'total_releases_seen' => count($releases),
-                'source_confidence_avg' => $sourceConfidences === []
-                    ? 0.0
-                    : round(array_sum($sourceConfidences) / count($sourceConfidences), 4),
-                'matched_sources' => $matchedSources,
-                'has_wikipedia' => $this->isAvailable($sources, 'wikipedia'),
+                'musicbrainz_release_groups_total' => count($musicbrainzReleases),
+                'release_sources_covered' => $this->countReleaseSources($releases),
+                'source_confidence_avg' => $this->average($identitySourceConfidences, $signalSourceConfidences),
+                'identity_source_confidence_avg' => $this->average($identitySourceConfidences),
+                'signal_source_confidence_avg' => $this->average($signalSourceConfidences),
+                'matched_identity_sources' => $matchedIdentitySources,
+                'identity_confidence' => (float) ($identity['confidence'] ?? 0.0),
+                'identity_sources_total' => count($identitySources),
+                'identity_sources_available' => $identityAvailableCount,
+                'signal_sources_total' => count($signalSources),
+                'signal_sources_available' => $signalAvailableCount,
+                'has_musicbrainz' => $this->isAvailable($identitySources, 'musicbrainz'),
+                'has_wikipedia' => $this->isAvailable($identitySources, 'wikipedia'),
                 'has_official_website' => $officialWebsite !== '',
+                'has_bandcamp' => $this->isAvailable($identitySources, 'bandcamp'),
             ],
         ];
     }
@@ -401,9 +525,21 @@ final class ReportService
      */
     private function isAvailable(array $sources, string $source): bool
     {
-        $status = $sources[$source]['status'] ?? 'error';
+        if (!isset($sources[$source])) {
+            return false;
+        }
 
-        return $status === 'ok';
+        $status = (string) ($sources[$source]['status'] ?? 'error');
+        if ($status === 'ok') {
+            return true;
+        }
+
+        if ($status === 'partial') {
+            $profile = $sources[$source]['payload']['profile'] ?? [];
+            return is_array($profile) && trim((string) ($profile['name'] ?? $profile['title'] ?? '')) !== '';
+        }
+
+        return false;
     }
 
     /**
@@ -420,9 +556,10 @@ final class ReportService
     /**
      * @param array<int, array<string, mixed>> $spotifyReleases
      * @param array<int, array<string, mixed>> $lastfmReleases
+     * @param array<int, array<string, mixed>> $musicbrainzReleases
      * @return array<int, array<string, mixed>>
      */
-    private function mergeReleases(array $spotifyReleases, array $lastfmReleases): array
+    private function mergeReleases(array $spotifyReleases, array $lastfmReleases, array $musicbrainzReleases): array
     {
         $rows = [];
 
@@ -430,11 +567,13 @@ final class ReportService
             if (!is_array($release)) {
                 continue;
             }
+
             $rows[] = [
                 'title' => (string) ($release['title'] ?? ''),
                 'release_date' => (string) ($release['release_date'] ?? ''),
                 'release_type' => (string) ($release['release_type'] ?? ''),
                 'source' => 'spotify',
+                'source_id' => (string) ($release['source_id'] ?? ''),
                 'url' => (string) ($release['url'] ?? ''),
             ];
         }
@@ -443,11 +582,28 @@ final class ReportService
             if (!is_array($release)) {
                 continue;
             }
+
             $rows[] = [
                 'title' => (string) ($release['title'] ?? ''),
-                'release_date' => '',
-                'release_type' => 'top_album',
+                'release_date' => (string) ($release['release_date'] ?? ''),
+                'release_type' => (string) (($release['release_type'] ?? '') ?: 'top_album'),
                 'source' => 'lastfm',
+                'source_id' => (string) ($release['source_id'] ?? ''),
+                'url' => (string) ($release['url'] ?? ''),
+            ];
+        }
+
+        foreach ($musicbrainzReleases as $release) {
+            if (!is_array($release)) {
+                continue;
+            }
+
+            $rows[] = [
+                'title' => (string) ($release['title'] ?? ''),
+                'release_date' => (string) ($release['release_date'] ?? ''),
+                'release_type' => (string) ($release['release_type'] ?? 'release_group'),
+                'source' => 'musicbrainz',
+                'source_id' => (string) ($release['source_id'] ?? ''),
                 'url' => (string) ($release['url'] ?? ''),
             ];
         }
@@ -456,11 +612,34 @@ final class ReportService
         $unique = [];
 
         foreach ($rows as $row) {
-            $key = strtolower(trim($row['title'])) . '|' . strtolower(trim($row['release_date']));
+            $title = trim((string) ($row['title'] ?? ''));
+            if ($title === '') {
+                continue;
+            }
+
+            $key = strtolower(preg_replace('/[^a-z0-9]+/i', '', $title) ?? $title) . '|' . strtolower(trim((string) ($row['release_date'] ?? '')));
             if ($key === '|' || isset($seen[$key])) {
                 continue;
             }
+
             $seen[$key] = true;
+            $releaseKeyRaw = implode('|', [
+                (string) ($row['source'] ?? ''),
+                (string) ($row['source_id'] ?? ''),
+                strtolower($title),
+                (string) ($row['release_date'] ?? ''),
+            ]);
+
+            $row['release_key'] = substr(sha1($releaseKeyRaw), 0, 16);
+            $row['can_expand'] = false;
+            $row['detail_stub'] = [
+                'tracks' => [],
+                'album_info' => [],
+                'context' => [],
+                'related_releases' => [],
+                'similar_artists' => [],
+            ];
+
             $unique[] = $row;
         }
 
@@ -471,7 +650,7 @@ final class ReportService
             }
         );
 
-        return $unique;
+        return array_slice($unique, 0, 25);
     }
 
     private function isFresh(string $createdAt): bool
@@ -599,5 +778,135 @@ final class ReportService
         }
 
         return null;
+    }
+
+    /**
+     * @param array<string, mixed> $sourceData
+     * @return array<int, array<string, mixed>>
+     */
+    private function normalizeSourceErrors(array $sourceData): array
+    {
+        $errors = $sourceData['errors'] ?? [];
+        if (!is_array($errors)) {
+            return [];
+        }
+
+        $rows = [];
+
+        foreach ($errors as $error) {
+            if (is_string($error)) {
+                $rows[] = [
+                    'code' => 'source_partial',
+                    'message' => $error,
+                    'context' => [],
+                ];
+                continue;
+            }
+
+            if (!is_array($error)) {
+                continue;
+            }
+
+            $message = trim((string) ($error['message'] ?? ''));
+            if ($message === '') {
+                continue;
+            }
+
+            $rows[] = [
+                'code' => (string) (($error['code'] ?? '') ?: 'source_partial'),
+                'message' => $message,
+                'context' => is_array($error['context'] ?? null) ? $error['context'] : [],
+            ];
+        }
+
+        return $rows;
+    }
+
+    /**
+     * @param array<string, array<string, mixed>> $identitySources
+     * @param array<string, array<string, mixed>> $signalSources
+     * @return array<string, array<string, mixed>>
+     */
+    private function buildSourceStatus(array $identitySources, array $signalSources): array
+    {
+        $rows = [];
+
+        foreach ($identitySources as $source => $sourceData) {
+            $rows[(string) $source] = [
+                'role' => 'identity',
+                'status' => (string) ($sourceData['status'] ?? 'error'),
+                'confidence' => (float) ($sourceData['confidence'] ?? 0.0),
+                'fetched_at' => (string) ($sourceData['fetched_at'] ?? ''),
+                'collection_method' => (string) ($sourceData['collection_method'] ?? 'unknown'),
+                'error_count' => is_array($sourceData['errors'] ?? null) ? count($sourceData['errors']) : 0,
+            ];
+        }
+
+        foreach ($signalSources as $source => $sourceData) {
+            $rows[(string) $source] = [
+                'role' => 'signal',
+                'status' => (string) ($sourceData['status'] ?? 'error'),
+                'confidence' => (float) ($sourceData['confidence'] ?? 0.0),
+                'fetched_at' => (string) ($sourceData['fetched_at'] ?? ''),
+                'collection_method' => (string) ($sourceData['collection_method'] ?? 'unknown'),
+                'error_count' => is_array($sourceData['errors'] ?? null) ? count($sourceData['errors']) : 0,
+            ];
+        }
+
+        return $rows;
+    }
+
+    /**
+     * @param array<string, array<string, mixed>> $sources
+     */
+    private function availableCount(array $sources): int
+    {
+        $count = 0;
+        foreach ($sources as $sourceName => $row) {
+            if ($this->isAvailable($sources, (string) $sourceName)) {
+                $count++;
+            }
+        }
+
+        return $count;
+    }
+
+    /**
+     * @param float[] ...$sets
+     */
+    private function average(array ...$sets): float
+    {
+        $all = [];
+        foreach ($sets as $set) {
+            foreach ($set as $value) {
+                $all[] = (float) $value;
+            }
+        }
+
+        if ($all === []) {
+            return 0.0;
+        }
+
+        return round(array_sum($all) / count($all), 4);
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $releases
+     */
+    private function countReleaseSources(array $releases): int
+    {
+        $sources = [];
+        foreach ($releases as $release) {
+            if (!is_array($release)) {
+                continue;
+            }
+
+            $source = trim((string) ($release['source'] ?? ''));
+            if ($source !== '') {
+                $sources[$source] = true;
+            }
+        }
+
+        return count($sources);
     }
 }

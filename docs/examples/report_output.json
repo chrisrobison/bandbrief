@@ -2,65 +2,90 @@
   "ok": true,
   "data": {
     "report_id": 42,
-    "artist_id": 7,
+    "artist_id": 88,
     "status": "partial",
     "cached": false,
+    "source_status": {
+      "musicbrainz": {
+        "role": "identity",
+        "status": "ok",
+        "confidence": 0.94,
+        "fetched_at": "2026-04-12T17:12:30Z",
+        "collection_method": "official_api",
+        "error_count": 0
+      },
+      "reddit": {
+        "role": "signal",
+        "status": "ok",
+        "confidence": 0.67,
+        "fetched_at": "2026-04-12T17:12:32Z",
+        "collection_method": "search_api",
+        "error_count": 0
+      }
+    },
     "report": {
-      "generated_at": "2026-04-12T16:20:00+00:00",
-      "normalized_profile": {
-        "requested_name": "Khruangbin",
+      "generated_at": "2026-04-12T17:12:35Z",
+      "summary": {
         "canonical_name": "Khruangbin",
-        "description": "American musical trio from Houston, Texas.",
-        "official_website": "https://www.khruangbin.com"
+        "match_type": "likely_match",
+        "identity_confidence": 0.81,
+        "overview": "Khruangbin resolved as likely match (identity confidence 0.81).",
+        "booking_take": "Moderate booking signal: viable for targeted rooms and support slots; verify missing sources before committing spend."
       },
       "platform_presence": {
+        "musicbrainz": {
+          "available": true,
+          "url": "https://musicbrainz.org/artist/8e57c2f7-3db6-4f44-b69a-0948ac5f729f"
+        },
         "spotify": {
           "available": true,
           "url": "https://open.spotify.com/artist/..."
         },
-        "lastfm": {
-          "available": true,
-          "url": "https://www.last.fm/music/Khruangbin"
-        },
-        "wikipedia": {
-          "available": true,
-          "url": "https://en.wikipedia.org/wiki/Khruangbin"
-        },
         "reddit": {
           "available": true,
           "url": "https://www.reddit.com/search/?q=Khruangbin"
-        },
-        "bandcamp": {
-          "available": false,
-          "url": ""
-        },
-        "official_website": {
-          "available": true,
-          "url": "https://www.khruangbin.com"
         }
       },
-      "releases": [],
-      "engagement": {
-        "spotify_popularity": 62,
-        "lastfm_playcount": 421330,
-        "reddit_total_upvotes": 718
-      },
-      "community_signal": {
-        "mentions_total": 21,
-        "subreddits_count": 9,
-        "mentions": []
-      },
-      "live_activity": {
-        "status": "missing",
-        "note": "No live event source is integrated in the MVP yet."
-      },
-      "bandbrief_score": 68,
-      "score_breakdown": [],
-      "booking_take": "Moderate booking signal: viable for targeted rooms and support slots; verify missing sources before committing spend.",
-      "missing_data": [
-        "bandcamp"
+      "releases": [
+        {
+          "title": "A LA SALA",
+          "release_date": "2024-04-05",
+          "release_type": "album",
+          "source": "spotify",
+          "release_key": "f12ab34e98cd0012",
+          "can_expand": false,
+          "detail_stub": {
+            "tracks": [],
+            "album_info": [],
+            "context": [],
+            "related_releases": [],
+            "similar_artists": []
+          }
+        }
       ],
-      "sections": []
+      "bandbrief_score": 67,
+      "score_confidence": {
+        "overall": 0.72,
+        "identity_confidence": 0.81,
+        "coverage_confidence": 0.78,
+        "evidence_confidence": 0.59
+      },
+      "missing_data": ["bandcamp"],
+      "sections": [
+        {
+          "name": "Overview",
+          "content": {
+            "summary": "Khruangbin resolved as likely match (identity confidence 0.81)."
+          }
+        },
+        {
+          "name": "Score Summary",
+          "content": {
+            "bandbrief_score": 67,
+            "confidence": 0.72
+          }
+        }
+      ]
     }
   },
   "meta": {

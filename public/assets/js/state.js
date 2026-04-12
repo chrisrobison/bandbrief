@@ -2,6 +2,7 @@ const state = {
   loading: false,
   error: null,
   report: null,
+  envelope: null,
   lastQuery: "",
 };
 

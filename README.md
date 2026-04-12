@@ -28,6 +28,7 @@ BandBrief is a plain-PHP + plain-JS system that generates a deterministic intell
 
 - Spotify (`official_api`) via Client Credentials
 - Last.fm (`official_api`) via API key
+- MusicBrainz (`official_api`) with compliant `User-Agent`
 - Wikipedia (`official_api`) MediaWiki + Wikidata
 - Reddit (`search_api`) public JSON search
 - Bandcamp (`scraping`) HTML search parse
@@ -53,6 +54,12 @@ CREATE DATABASE bandbrief CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 mysql -u root -p bandbrief < sql/schema.sql
 ```
 
+If you already have an existing database, apply incremental migrations too:
+
+```bash
+mysql -u root -p bandbrief < sql/migrations/20260412_source_snapshot_provenance.sql
+```
+
 ## 2. Environment Setup
 
 ```bash
@@ -65,6 +72,7 @@ Set credentials as available:
 - `SPOTIFY_CLIENT_SECRET`
 - `LASTFM_API_KEY`
 - `REDDIT_USER_AGENT`
+- `MUSICBRAINZ_USER_AGENT` (required by MusicBrainz usage policy)
 
 The system still works with partial data when credentials are missing.
 

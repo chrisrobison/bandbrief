@@ -40,6 +40,7 @@ final class ArtistsApi extends ApiBase
         ], [
             'query' => $query,
             'limit' => $limit,
+            'strategy' => 'local_then_identity_sources',
         ]);
     }
 

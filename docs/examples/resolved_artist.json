@@ -1,0 +1,50 @@
+{
+  "ok": true,
+  "data": {
+    "artist_id": 88,
+    "canonical_name": "Khruangbin",
+    "identity": {
+      "canonical_name": "Khruangbin",
+      "match_type": "exact_match",
+      "confidence": 0.91,
+      "explanation": "Exact match for \"Khruangbin\" selected with 0.91 confidence. Sources agreeing: musicbrainz, spotify, lastfm, wikipedia.",
+      "source_matches": [
+        {
+          "source": "musicbrainz",
+          "candidate": "Khruangbin",
+          "name_similarity": 1,
+          "confidence": 0.95,
+          "matched": true
+        }
+      ],
+      "explainability": {
+        "sources_agreed": ["musicbrainz", "spotify", "lastfm", "wikipedia"],
+        "confidence_reducers": [],
+        "ambiguity_reasons": [],
+        "candidate_rankings": [
+          {
+            "canonical_name": "Khruangbin",
+            "confidence": 0.91,
+            "source_count": 4,
+            "sources": ["musicbrainz", "spotify", "lastfm", "wikipedia"]
+          }
+        ]
+      }
+    },
+    "source_groups": {
+      "identity_sources": {
+        "musicbrainz": {
+          "source": "musicbrainz",
+          "status": "ok",
+          "confidence": 0.96
+        }
+      },
+      "signal_sources": []
+    }
+  },
+  "meta": {
+    "requested_name": "Khruangbin",
+    "resource": "artists",
+    "action": "resolve"
+  }
+}
