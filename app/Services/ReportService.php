@@ -52,7 +52,7 @@ final class ReportService
         $this->musicbrainzAdapter = new MusicbrainzAdapter($http, (array) ($config['sources']['musicbrainz'] ?? []));
         $this->spotifyAdapter = new SpotifyAdapter($http, (array) ($config['sources']['spotify'] ?? []));
         $this->lastfmAdapter = new LastfmAdapter($http, (array) ($config['sources']['lastfm'] ?? []));
-        $this->wikipediaAdapter = new WikipediaAdapter($http, []);
+        $this->wikipediaAdapter = new WikipediaAdapter($http, (array) ($config['sources']['wikipedia'] ?? []));
         $this->redditAdapter = new RedditAdapter($http, (array) ($config['sources']['reddit'] ?? []));
         $this->bandcampAdapter = new BandcampAdapter($http, (array) ($config['sources']['bandcamp'] ?? []));
     }

@@ -71,6 +71,7 @@ Set credentials as available:
 - `SPOTIFY_CLIENT_ID`
 - `SPOTIFY_CLIENT_SECRET`
 - `LASTFM_API_KEY`
+- `WIKIPEDIA_USER_AGENT`
 - `REDDIT_USER_AGENT`
 - `MUSICBRAINZ_USER_AGENT` (required by MusicBrainz usage policy)
 

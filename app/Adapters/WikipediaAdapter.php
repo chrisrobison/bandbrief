@@ -26,8 +26,13 @@ final class WikipediaAdapter extends BaseAdapter
      */
     public function fetchArtist(string $artistName): array
     {
+        $headers = [
+            'Accept' => 'application/json',
+            'User-Agent' => $this->userAgent(),
+        ];
+
         $searchUrl = 'https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=' . rawurlencode($artistName . ' band musician') . '&format=json&utf8=1';
-        $searchResponse = $this->http->getJson($searchUrl);
+        $searchResponse = $this->http->getJson($searchUrl, $headers);
 
         if (!$searchResponse['ok']) {
             return $this->failed('official_api', 'wikipedia_search_failed', 'Wikipedia search request failed');
@@ -49,7 +54,7 @@ final class WikipediaAdapter extends BaseAdapter
         }
 
         $summaryUrl = 'https://en.wikipedia.org/api/rest_v1/page/summary/' . rawurlencode($title);
-        $summaryResponse = $this->http->getJson($summaryUrl);
+        $summaryResponse = $this->http->getJson($summaryUrl, $headers);
 
         if (!$summaryResponse['ok']) {
             return $this->partial('official_api', 0.2, ['title' => $title], ['Wikipedia summary fetch failed']);
@@ -60,7 +65,7 @@ final class WikipediaAdapter extends BaseAdapter
 
         $officialWebsite = '';
         if ($wikidataId !== '') {
-            $officialWebsite = $this->fetchOfficialWebsiteFromWikidata($wikidataId);
+            $officialWebsite = $this->fetchOfficialWebsiteFromWikidata($wikidataId, $headers);
         }
 
         $name = (string) ($summary['title'] ?? $title);
@@ -79,10 +84,13 @@ final class WikipediaAdapter extends BaseAdapter
         ]);
     }
 
-    private function fetchOfficialWebsiteFromWikidata(string $wikidataId): string
+    /**
+     * @param array<string, string> $headers
+     */
+    private function fetchOfficialWebsiteFromWikidata(string $wikidataId, array $headers): string
     {
         $url = 'https://www.wikidata.org/w/api.php?action=wbgetentities&ids=' . rawurlencode($wikidataId) . '&format=json&props=claims';
-        $response = $this->http->getJson($url);
+        $response = $this->http->getJson($url, $headers);
 
         if (!$response['ok']) {
             return '';
@@ -99,5 +107,15 @@ final class WikipediaAdapter extends BaseAdapter
         }
 
         return (string) (($first['mainsnak']['datavalue']['value'] ?? '') ?: '');
+    }
+
+    private function userAgent(): string
+    {
+        $configured = trim((string) ($this->config['user_agent'] ?? ''));
+        if ($configured !== '') {
+            return $configured;
+        }
+
+        return 'BandBrief/1.0 (+https://yourdomain.example/contact)';
     }
 }

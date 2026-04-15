@@ -23,6 +23,9 @@ return [
         'lastfm' => [
             'api_key' => getenv('LASTFM_API_KEY') ?: '',
         ],
+        'wikipedia' => [
+            'user_agent' => getenv('WIKIPEDIA_USER_AGENT') ?: 'BandBrief/1.0 (+https://yourdomain.example/contact)',
+        ],
         'reddit' => [
             'user_agent' => getenv('REDDIT_USER_AGENT') ?: 'BandBrief/1.0 (+https://example.com)',
         ],
