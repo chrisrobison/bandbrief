@@ -22,12 +22,14 @@ final class ArtistRepository
     {
         $sql = 'SELECT id, canonical_name, display_name, resolver_confidence, created_at, updated_at
                 FROM artists
-                WHERE canonical_name LIKE :q OR display_name LIKE :q
+                WHERE canonical_name LIKE :q_canonical OR display_name LIKE :q_display
                 ORDER BY updated_at DESC
                 LIMIT :limit';
 
         $stmt = $this->pdo->prepare($sql);
-        $stmt->bindValue(':q', '%' . $query . '%', PDO::PARAM_STR);
+        $likeQuery = '%' . $query . '%';
+        $stmt->bindValue(':q_canonical', $likeQuery, PDO::PARAM_STR);
+        $stmt->bindValue(':q_display', $likeQuery, PDO::PARAM_STR);
         $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
         $stmt->execute();
 

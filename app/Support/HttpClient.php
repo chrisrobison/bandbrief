@@ -38,7 +38,7 @@ final class HttpClient
         $body = curl_exec($curl);
         $error = curl_error($curl) ?: null;
         $status = (int) curl_getinfo($curl, CURLINFO_RESPONSE_CODE);
-        curl_close($curl);
+        $this->releaseCurlHandle($curl);
 
         if ($body === false) {
             return [
@@ -130,7 +130,7 @@ final class HttpClient
         $body = curl_exec($curl);
         $error = curl_error($curl) ?: null;
         $status = (int) curl_getinfo($curl, CURLINFO_RESPONSE_CODE);
-        curl_close($curl);
+        $this->releaseCurlHandle($curl);
 
         if ($body === false) {
             return [
@@ -149,5 +149,17 @@ final class HttpClient
             'body' => $body,
             'error' => $isOk ? null : ($error ?? ('HTTP ' . $status)),
         ];
+    }
+
+    /**
+     * cURL handles are auto-released on PHP 8+, and explicit close is deprecated in PHP 8.5.
+     *
+     * @param mixed $curl
+     */
+    private function releaseCurlHandle($curl): void
+    {
+        if (PHP_VERSION_ID < 80000) {
+            curl_close($curl);
+        }
     }
 }
