@@ -1,4 +1,4 @@
-const API_BASE = "/api.php";
+const API_BASE = "api.php";
 
 async function request(path, options = {}) {
   const response = await fetch(`${API_BASE}${path}`, {
