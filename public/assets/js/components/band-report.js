@@ -43,8 +43,10 @@ class BandReport extends HTMLElement {
       return;
     }
 
-    const summary = report.summary || {};
+    const summary = report.summary && typeof report.summary === "object" ? report.summary : {};
     const canonicalName = String(summary.canonical_name || report.normalized_profile?.canonical_name || "BandBrief Report");
+    const overview = String(summary.overview || report.sections?.[0]?.content?.summary || "No summary available.");
+    const bookingTake = String(summary.booking_take || report.booking_take || "No booking take available.");
     const missingData = Array.isArray(report.missing_data) ? report.missing_data : [];
 
     const sourceStatus =
@@ -55,30 +57,34 @@ class BandReport extends HTMLElement {
     const sourceContent = report.source_content || {};
 
     const releases = Array.isArray(report.releases) ? report.releases : [];
-    const releaseRows = releases
-      .slice(0, 12)
+    const albums = releases.filter((release) => {
+      const type = String(release?.release_type || "").toLowerCase();
+      return type.includes("album");
+    });
+    const albumPool = albums.length ? albums : releases;
+    const albumRows = albumPool
+      .slice(0, 24)
       .map((release) => {
         const title = this.escape(String(release.title || "Untitled release"));
         const releaseDate = this.escape(String(release.release_date || "date unknown"));
         const releaseType = this.escape(String(release.release_type || "release"));
         const source = this.escape(String(release.source || "unknown"));
         const url = String(release.url || "").trim();
-        const key = this.escape(String(release.release_key || ""));
+        const albumMeta = `${releaseType} • ${releaseDate} • ${source}`;
 
         return `
-          <li class="release-row" data-release-key="${key}">
+          <li class="album-row">
             <div>
-              <div class="release-title">${title}</div>
-              <div class="muted release-meta">${releaseType} • ${releaseDate} • ${source}</div>
+              <div class="album-title">${title}</div>
+              <div class="muted album-meta">${albumMeta}</div>
             </div>
-            <div class="release-actions">
-              ${url ? `<a class="badge" href="${this.escape(url)}" target="_blank" rel="noreferrer">Open</a>` : ""}
-              <button class="badge" type="button" disabled title="Release detail drawer is planned">Details soon</button>
-            </div>
+            ${url ? `<a class="badge" href="${this.escape(url)}" target="_blank" rel="noreferrer">Open</a>` : ""}
           </li>
         `;
       })
       .join("");
+
+    const hiddenAlbumCount = Math.max(0, albumPool.length - 24);
 
     const breakdown = Array.isArray(report.score_breakdown) ? report.score_breakdown : [];
     const scoreRows = breakdown
@@ -86,6 +92,9 @@ class BandReport extends HTMLElement {
         const category = this.escape(String(row.category || "Category"));
         const value = Number(row.score || 0);
         const clamped = Math.max(0, Math.min(100, value));
+        const weight = Number(row.weight || 0);
+        const weighted = Number(row.weighted || 0);
+        const explanation = String(row.explanation || "").trim();
 
         return `
           <div class="score-row">
@@ -94,13 +103,19 @@ class BandReport extends HTMLElement {
               <strong>${clamped}</strong>
             </div>
             <div class="bar"><span style="width:${clamped}%"></span></div>
+            <div class="muted score-row-meta">${Math.round(weight * 100)}% weight • ${weighted.toFixed(2)} weighted points</div>
+            ${explanation ? `<p class="muted score-row-note">${this.escape(explanation)}</p>` : ""}
           </div>
         `;
       })
       .join("");
 
+    const bandScore = Number(report.bandbrief_score || 0);
     const identityConfidence = Number(report.score_confidence?.identity_confidence || summary.identity_confidence || 0);
     const overallConfidence = Number(report.score_confidence?.overall || 0);
+    const coverageConfidence = Number(report.score_confidence?.coverage_confidence || 0);
+    const evidenceConfidence = Number(report.score_confidence?.evidence_confidence || 0);
+    const matchType = String(summary.match_type || report.identity?.match_type || "unknown");
 
     const warnings = missingData
       .map((source) => `<li>${this.escape(String(source))}</li>`)
@@ -114,21 +129,38 @@ class BandReport extends HTMLElement {
         </span>
       </div>
 
-      <div class="summary-grid">
-        <article class="report-section summary-card">
-          <h3>Overview</h3>
-          <p>${this.escape(String(summary.overview || report.sections?.[0]?.content?.summary || "No summary available."))}</p>
-          <p class="muted"><strong>Match:</strong> ${this.escape(String(summary.match_type || report.identity?.match_type || "unknown"))}</p>
-          <p class="muted"><strong>Generated:</strong> ${this.escape(String(report.generated_at || "unknown"))}</p>
-        </article>
+      <article class="report-section summary-top">
+        <h3>Summary</h3>
+        <p class="summary-lead">${this.escape(overview)}</p>
+        <p class="summary-booking">${this.escape(bookingTake)}</p>
+        <div class="summary-meta">
+          <span class="badge">Match: ${this.escape(this.formatMatchType(matchType))}</span>
+          <span class="badge">Generated: ${this.escape(this.formatTimestamp(report.generated_at))}</span>
+        </div>
+      </article>
 
-        <article class="report-section summary-card">
-          <h3>Confidence</h3>
-          <p><strong>Overall:</strong> ${Math.round(overallConfidence * 100)}%</p>
-          <p><strong>Identity:</strong> ${Math.round(identityConfidence * 100)}%</p>
-          <p><strong>Booking Take:</strong> ${this.escape(String(summary.booking_take || report.booking_take || "No booking take available."))}</p>
-        </article>
-      </div>
+      <article class="report-section score-summary">
+        <div class="score-head">
+          <div class="score-main">
+            <span class="score-pill">BandBrief Score ${bandScore}</span>
+            <span class="badge">Deterministic weighted model</span>
+          </div>
+          <div class="score-confidence">
+            <span class="badge">overall ${Math.round(overallConfidence * 100)}%</span>
+            <span class="badge">identity ${Math.round(identityConfidence * 100)}%</span>
+            <span class="badge">coverage ${Math.round(coverageConfidence * 100)}%</span>
+            <span class="badge">evidence ${Math.round(evidenceConfidence * 100)}%</span>
+          </div>
+        </div>
+        <h4>Score Breakdown</h4>
+        <div class="score-grid">${scoreRows || "<p class='muted'>No category breakdown provided.</p>"}</div>
+      </article>
+
+      <details class="report-section albums-section">
+        <summary><strong>${albums.length ? "Albums" : "Releases"}</strong> (${albumPool.length})</summary>
+        <ul class="albums-list">${albumRows || "<li class='muted'>No release data available.</li>"}</ul>
+        ${hiddenAlbumCount ? `<p class="muted album-note">${hiddenAlbumCount} more not shown.</p>` : ""}
+      </details>
 
       <article class="report-section">
         <h3>Source Freshness & Coverage</h3>
@@ -136,22 +168,8 @@ class BandReport extends HTMLElement {
       </article>
 
       <article class="report-section">
-        <h3>Source Content</h3>
-        <div class="source-content-list">${this.renderSourceContentPanels(sourceContent, sourceStatus)}</div>
-      </article>
-
-      <article class="report-section">
-        <h3>Releases</h3>
-        <ul class="releases-list">${releaseRows || "<li class='muted'>No release data available.</li>"}</ul>
-      </article>
-
-      <article class="report-section">
-        <h3>Score Summary</h3>
-        <div class="score-head">
-          <span class="score-pill">BandBrief Score ${Number(report.bandbrief_score || 0)}</span>
-          <span class="badge">Deterministic weighted model</span>
-        </div>
-        <div class="score-grid">${scoreRows || "<p class='muted'>No category breakdown provided.</p>"}</div>
+        <h3>Source Highlights</h3>
+        <div class="source-content-list">${this.renderSourceDigestCards(sourceContent, sourceStatus)}</div>
       </article>
 
       <article class="report-section ${warnings ? "warning" : ""}">
@@ -159,8 +177,8 @@ class BandReport extends HTMLElement {
         ${warnings ? `<ul class="risk-list">${warnings}</ul>` : "<p class='muted'>No material missing-data warnings.</p>"}
       </article>
 
-      <details class="report-section">
-        <summary>Admin JSON (raw report payload)</summary>
+      <details class="report-section raw-json">
+        <summary>Raw Report JSON (debug)</summary>
         <pre>${this.escape(JSON.stringify(reportEnvelope || report || envelope || {}, null, 2))}</pre>
       </details>
 
@@ -172,74 +190,34 @@ class BandReport extends HTMLElement {
           justify-content: space-between;
           margin-bottom: 0.75rem;
         }
-        .summary-grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-          gap: 0.75rem;
-          margin-bottom: 0.75rem;
+        .summary-top h3,
+        .score-summary h4 {
+          margin: 0 0 0.45rem;
         }
-        .summary-card h3 {
-          margin: 0 0 0.35rem;
+        .summary-lead {
+          margin: 0 0 0.5rem;
+          font-size: 1rem;
         }
-        .source-badges {
+        .summary-booking {
+          margin: 0;
+        }
+        .summary-meta {
           display: flex;
           flex-wrap: wrap;
           gap: 0.45rem;
-        }
-        .source-badge {
-          display: inline-flex;
-          align-items: center;
-          gap: 0.3rem;
-        }
-        .source-content-list {
-          display: grid;
-          gap: 0.45rem;
-        }
-        .source-content-panel {
-          border: 1px solid #ddd6c9;
-          border-radius: 10px;
-          background: #f8f7f4;
-          padding: 0.4rem 0.55rem;
-        }
-        .source-content-panel > summary {
-          cursor: pointer;
-          font-size: 0.92rem;
-        }
-        .source-content-panel pre {
-          margin: 0.6rem 0 0;
-        }
-        .releases-list {
-          list-style: none;
-          padding: 0;
-          margin: 0;
-          display: grid;
-          gap: 0.6rem;
-        }
-        .release-row {
-          border: 1px solid #ddd6c9;
-          border-radius: 10px;
-          padding: 0.6rem;
-          display: flex;
-          justify-content: space-between;
-          gap: 0.6rem;
-        }
-        .release-title {
-          font-weight: 600;
-        }
-        .release-meta {
-          font-size: 0.86rem;
-        }
-        .release-actions {
-          display: inline-flex;
-          align-items: center;
-          gap: 0.35rem;
+          margin-top: 0.7rem;
         }
         .score-head {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          gap: 0.5rem;
+          display: grid;
+          gap: 0.55rem;
           margin-bottom: 0.65rem;
+        }
+        .score-main,
+        .score-confidence {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 0.45rem;
+          align-items: center;
         }
         .score-pill {
           display: inline-block;
@@ -251,13 +229,24 @@ class BandReport extends HTMLElement {
         }
         .score-grid {
           display: grid;
-          gap: 0.5rem;
+          gap: 0.7rem;
+        }
+        .score-row {
+          border: 1px solid #ddd6c9;
+          border-radius: 10px;
+          padding: 0.55rem;
+          background: #faf9f6;
         }
         .score-row-head {
           display: flex;
           justify-content: space-between;
-          margin-bottom: 0.2rem;
+          margin-bottom: 0.3rem;
           font-size: 0.92rem;
+        }
+        .score-row-meta,
+        .score-row-note {
+          margin: 0.45rem 0 0;
+          font-size: 0.84rem;
         }
         .bar {
           width: 100%;
@@ -271,6 +260,86 @@ class BandReport extends HTMLElement {
           height: 100%;
           background: linear-gradient(90deg, #0f6e8b, #2b93af);
         }
+        .albums-section > summary {
+          cursor: pointer;
+        }
+        .albums-list {
+          list-style: none;
+          padding: 0;
+          margin: 0.75rem 0 0;
+          display: grid;
+          gap: 0.55rem;
+        }
+        .album-row {
+          border: 1px solid #ddd6c9;
+          border-radius: 10px;
+          padding: 0.55rem;
+          display: flex;
+          justify-content: space-between;
+          gap: 0.6rem;
+          align-items: center;
+          background: #f8f7f4;
+        }
+        .album-title {
+          font-weight: 600;
+        }
+        .album-meta {
+          font-size: 0.86rem;
+        }
+        .album-note {
+          margin: 0.7rem 0 0;
+        }
+        .source-badges {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 0.45rem;
+        }
+        .source-badge {
+          display: inline-flex;
+          align-items: center;
+          gap: 0.3rem;
+        }
+        .source-content-list {
+          display: grid;
+          gap: 0.65rem;
+        }
+        .source-content-panel {
+          border: 1px solid #ddd6c9;
+          border-radius: 10px;
+          background: #f8f7f4;
+          padding: 0.55rem;
+        }
+        .source-card-head {
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-start;
+          gap: 0.5rem;
+          margin-bottom: 0.4rem;
+        }
+        .source-card-title {
+          margin: 0;
+          font-size: 0.95rem;
+        }
+        .source-card-meta {
+          margin: 0;
+          font-size: 0.82rem;
+        }
+        .source-highlight-list {
+          margin: 0.2rem 0 0;
+          padding-left: 1rem;
+          display: grid;
+          gap: 0.25rem;
+        }
+        .source-highlight-list li {
+          font-size: 0.88rem;
+        }
+        .source-raw {
+          margin-top: 0.5rem;
+        }
+        .source-raw > summary {
+          cursor: pointer;
+          font-size: 0.86rem;
+        }
         .risk-list {
           margin: 0;
           padding-left: 1.1rem;
@@ -280,6 +349,9 @@ class BandReport extends HTMLElement {
         .warning {
           border-color: rgba(184, 101, 26, 0.35);
           background: rgba(184, 101, 26, 0.05);
+        }
+        .raw-json > summary {
+          cursor: pointer;
         }
         pre {
           background: #f8f7f4;
@@ -317,11 +389,11 @@ class BandReport extends HTMLElement {
       .join("");
   }
 
-  renderSourceContentPanels(sourceContent, sourceStatus) {
+  renderSourceDigestCards(sourceContent, sourceStatus) {
     const contentMap = sourceContent && typeof sourceContent === "object" ? sourceContent : {};
     const statusMap = sourceStatus && typeof sourceStatus === "object" ? sourceStatus : {};
 
-    const sources = Object.keys(contentMap).sort();
+    const sources = Array.from(new Set([...Object.keys(statusMap), ...Object.keys(contentMap)])).sort();
     if (!sources.length) {
       return "<span class='muted'>No source content available.</span>";
     }
@@ -344,19 +416,274 @@ class BandReport extends HTMLElement {
               ? contentRow.payload
               : {};
 
+        const highlights = this.extractSourceHighlights(source, payload);
         const summaryParts = [`${status}`, `${Math.round(confidence * 100)}% confidence`, freshness];
         if (method) {
           summaryParts.push(method);
         }
 
+        const highlightRows = highlights
+          .slice(0, 8)
+          .map((row) => `<li><strong>${this.escape(row.label)}:</strong> ${this.escape(row.value)}</li>`)
+          .join("");
+
         return `
-          <details class="source-content-panel">
-            <summary><strong>${this.escape(source)}</strong> • ${this.escape(summaryParts.join(" • "))}</summary>
-            <pre>${this.escape(JSON.stringify(payload, null, 2))}</pre>
-          </details>
+          <article class="source-content-panel">
+            <div class="source-card-head">
+              <div>
+                <h4 class="source-card-title">${this.escape(this.formatLabel(source))}</h4>
+                <p class="muted source-card-meta">${this.escape(summaryParts.join(" • "))}</p>
+              </div>
+            </div>
+            ${highlightRows ? `<ul class="source-highlight-list">${highlightRows}</ul>` : "<p class='muted'>No digestible highlights extracted from this source.</p>"}
+            ${
+              Object.keys(payload).length
+                ? `
+              <details class="source-raw">
+                <summary>Raw source JSON</summary>
+                <pre>${this.escape(JSON.stringify(payload, null, 2))}</pre>
+              </details>
+            `
+                : ""
+            }
+          </article>
         `;
       })
       .join("");
+  }
+
+  extractSourceHighlights(source, payload) {
+    if (!payload || typeof payload !== "object") {
+      return [];
+    }
+
+    const sourceKey = String(source || "").toLowerCase();
+    const highlights = [];
+    const seen = new Set();
+
+    const add = (label, value) => {
+      const display = this.humanizeValue(value);
+      if (!display) {
+        return;
+      }
+      const key = `${label}:${display}`;
+      if (seen.has(key)) {
+        return;
+      }
+      seen.add(key);
+      highlights.push({ label, value: display });
+    };
+
+    if (sourceKey.includes("musicbrainz")) {
+      add("Artist", this.pickFirst(payload, ["name", "artist.name"]));
+      add("Type", this.pickFirst(payload, ["type", "artist.type"]));
+      add("Country", this.pickFirst(payload, ["country", "artist.country", "area.name"]));
+      add("Tags", this.pickFirst(payload, ["tags", "genres"]));
+      add("Release Groups", this.pickFirst(payload, ["release_groups_total", "release_group_count", "release-groups"]));
+    }
+
+    if (sourceKey.includes("spotify")) {
+      add("Followers", this.pickFirst(payload, ["followers", "followers.total", "artist.followers.total"]));
+      add("Popularity", this.pickFirst(payload, ["popularity", "artist.popularity"]));
+      add("Genres", this.pickFirst(payload, ["genres", "artist.genres"]));
+      add("Catalog Size", this.pickFirst(payload, ["catalog_total", "album_count", "release_count", "total_releases"]));
+    }
+
+    if (sourceKey.includes("lastfm")) {
+      add("Listeners", this.pickFirst(payload, ["listeners", "stats.listeners"]));
+      add("Playcount", this.pickFirst(payload, ["playcount", "stats.playcount"]));
+      add("Top Tags", this.pickFirst(payload, ["tags", "toptags", "top_tags"]));
+    }
+
+    if (sourceKey.includes("reddit")) {
+      add("Mentions", this.pickFirst(payload, ["mentions_total", "posts_total", "total_posts"]));
+      add("Subreddits", this.pickFirst(payload, ["subreddits_count", "subreddit_count"]));
+      add("Upvotes", this.pickFirst(payload, ["total_upvotes", "upvotes_total"]));
+      add("Top Post", this.pickFirst(payload, ["top_post.title", "posts.0.title"]));
+    }
+
+    if (sourceKey.includes("wikipedia")) {
+      add("Title", this.pickFirst(payload, ["title", "name"]));
+      add("Summary", this.pickFirst(payload, ["summary", "extract", "description"]));
+      add("Article", this.pickFirst(payload, ["url", "canonical_url"]));
+    }
+
+    if (sourceKey.includes("bandcamp")) {
+      add("Artist", this.pickFirst(payload, ["name", "artist"]));
+      add("Location", this.pickFirst(payload, ["location"]));
+      add("Genre", this.pickFirst(payload, ["genre", "genres"]));
+      add("Profile", this.pickFirst(payload, ["url", "artist_url"]));
+    }
+
+    if (sourceKey.includes("official")) {
+      add("Website", this.pickFirst(payload, ["url", "website", "official_website"]));
+      add("Title", this.pickFirst(payload, ["title", "name"]));
+      add("Description", this.pickFirst(payload, ["description", "summary"]));
+    }
+
+    if (highlights.length >= 4) {
+      return highlights.slice(0, 8);
+    }
+
+    const fallbackRows = this.collectScalarRows(payload)
+      .filter((row) => row.value !== "")
+      .slice(0, 8);
+
+    for (const row of fallbackRows) {
+      add(this.formatLabel(row.path), row.value);
+      if (highlights.length >= 8) {
+        break;
+      }
+    }
+
+    return highlights.slice(0, 8);
+  }
+
+  collectScalarRows(node, prefix = "", depth = 0, rows = []) {
+    if (rows.length >= 24 || depth > 2 || node === null || node === undefined) {
+      return rows;
+    }
+
+    if (Array.isArray(node)) {
+      if (node.length === 0) {
+        return rows;
+      }
+
+      if (node.every((value) => ["string", "number", "boolean"].includes(typeof value))) {
+        rows.push({
+          path: prefix || "value",
+          value: this.humanizeValue(node),
+        });
+        return rows;
+      }
+
+      node.slice(0, 3).forEach((entry, index) => {
+        this.collectScalarRows(entry, prefix ? `${prefix}.${index}` : `${index}`, depth + 1, rows);
+      });
+      return rows;
+    }
+
+    if (typeof node === "object") {
+      Object.entries(node)
+        .slice(0, 18)
+        .forEach(([key, value]) => {
+          const path = prefix ? `${prefix}.${key}` : key;
+          if (value === null || value === undefined) {
+            return;
+          }
+          if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+            rows.push({
+              path,
+              value: this.humanizeValue(value),
+            });
+            return;
+          }
+          this.collectScalarRows(value, path, depth + 1, rows);
+        });
+      return rows;
+    }
+
+    rows.push({
+      path: prefix || "value",
+      value: this.humanizeValue(node),
+    });
+    return rows;
+  }
+
+  pickFirst(payload, paths) {
+    for (const path of paths) {
+      const value = this.readPath(payload, path);
+      if (value === undefined || value === null || value === "") {
+        continue;
+      }
+      return value;
+    }
+    return undefined;
+  }
+
+  readPath(node, path) {
+    if (!path) {
+      return undefined;
+    }
+
+    const parts = String(path).split(".");
+    let current = node;
+
+    for (const part of parts) {
+      if (current === null || current === undefined) {
+        return undefined;
+      }
+
+      if (Array.isArray(current)) {
+        const index = Number(part);
+        if (!Number.isInteger(index)) {
+          return undefined;
+        }
+        current = current[index];
+        continue;
+      }
+
+      if (typeof current === "object" && Object.prototype.hasOwnProperty.call(current, part)) {
+        current = current[part];
+        continue;
+      }
+
+      return undefined;
+    }
+
+    return current;
+  }
+
+  humanizeValue(value) {
+    if (value === null || value === undefined) {
+      return "";
+    }
+
+    if (typeof value === "string") {
+      const text = value.trim();
+      if (!text) {
+        return "";
+      }
+      return text.length > 190 ? `${text.slice(0, 187)}...` : text;
+    }
+
+    if (typeof value === "number") {
+      if (!Number.isFinite(value)) {
+        return "";
+      }
+      if (Math.abs(value) >= 1000) {
+        return new Intl.NumberFormat("en-US").format(value);
+      }
+      return String(value);
+    }
+
+    if (typeof value === "boolean") {
+      return value ? "yes" : "no";
+    }
+
+    if (Array.isArray(value)) {
+      if (!value.length) {
+        return "";
+      }
+      const scalarValues = value
+        .filter((entry) => ["string", "number", "boolean"].includes(typeof entry))
+        .map((entry) => this.humanizeValue(entry))
+        .filter(Boolean);
+
+      if (!scalarValues.length) {
+        return `${value.length} item(s)`;
+      }
+
+      const shown = scalarValues.slice(0, 4).join(", ");
+      return scalarValues.length > 4 ? `${shown} (+${scalarValues.length - 4} more)` : shown;
+    }
+
+    if (typeof value === "object") {
+      const keys = Object.keys(value);
+      return keys.length ? `${keys.length} field(s)` : "";
+    }
+
+    return String(value);
   }
 
   freshnessLabel(isoDate) {
@@ -386,6 +713,38 @@ class BandReport extends HTMLElement {
 
     const diffDays = Math.floor(diffHours / 24);
     return `${diffDays}d ago`;
+  }
+
+  formatMatchType(value) {
+    const text = String(value || "").trim();
+    if (!text) {
+      return "unknown";
+    }
+    return text.replaceAll("_", " ");
+  }
+
+  formatTimestamp(value) {
+    const text = String(value || "").trim();
+    if (!text) {
+      return "unknown";
+    }
+
+    const parsed = Date.parse(text);
+    if (!Number.isFinite(parsed)) {
+      return text;
+    }
+
+    return new Date(parsed).toLocaleString();
+  }
+
+  formatLabel(value) {
+    return String(value || "")
+      .replaceAll(".", " ")
+      .replaceAll("_", " ")
+      .replaceAll("-", " ")
+      .trim()
+      .replace(/\s+/g, " ")
+      .replace(/\b\w/g, (part) => part.toUpperCase());
   }
 
   escape(value) {
