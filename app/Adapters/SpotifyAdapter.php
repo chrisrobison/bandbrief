@@ -69,6 +69,7 @@ final class SpotifyAdapter extends BaseAdapter
         $artistId = (string) ($artist['id'] ?? '');
         $profileArtist = $artist;
         $releases = [];
+        $catalogTotal = 0;
 
         if ($artistId !== '') {
             $detailUrl = 'https://api.spotify.com/v1/artists/' . rawurlencode($artistId);
@@ -77,23 +78,39 @@ final class SpotifyAdapter extends BaseAdapter
                 $profileArtist = $detailResponse['data'];
             }
 
-            $releasesUrl = 'https://api.spotify.com/v1/artists/' . rawurlencode($artistId) . '/albums?include_groups=album,single&limit=20';
+            $releasesUrl = 'https://api.spotify.com/v1/artists/' . rawurlencode($artistId) . '/albums?include_groups=album,single&limit=10';
             $releasesResponse = $this->http->getJson($releasesUrl, ['Authorization' => 'Bearer ' . $token]);
+
             if ($releasesResponse['ok']) {
-                $itemsRaw = $releasesResponse['data']['items'] ?? [];
-                if (is_array($itemsRaw)) {
-                    foreach ($itemsRaw as $row) {
-                        if (!is_array($row)) {
-                            continue;
-                        }
-                        $releases[] = [
-                            'title' => (string) ($row['name'] ?? ''),
-                            'release_date' => (string) ($row['release_date'] ?? ''),
-                            'release_type' => (string) ($row['album_type'] ?? ''),
-                            'source_id' => (string) ($row['id'] ?? ''),
-                            'url' => (string) (($row['external_urls']['spotify'] ?? '') ?: ''),
-                        ];
+                $catalogTotal = (int) (($releasesResponse['data']['total'] ?? 0) ?: 0);
+                $pagesFetched = 0;
+                $nextUrl = $releasesUrl;
+
+                while ($nextUrl !== '' && $pagesFetched < 3) {
+                    $pageResponse = $pagesFetched === 0 ? $releasesResponse : $this->http->getJson($nextUrl, ['Authorization' => 'Bearer ' . $token]);
+                    if (!$pageResponse['ok']) {
+                        break;
                     }
+
+                    $itemsRaw = $pageResponse['data']['items'] ?? [];
+                    if (is_array($itemsRaw)) {
+                        foreach ($itemsRaw as $row) {
+                            if (!is_array($row)) {
+                                continue;
+                            }
+                            $releases[] = [
+                                'title' => (string) ($row['name'] ?? ''),
+                                'release_date' => (string) ($row['release_date'] ?? ''),
+                                'release_type' => (string) ($row['album_type'] ?? ''),
+                                'source_id' => (string) ($row['id'] ?? ''),
+                                'url' => (string) (($row['external_urls']['spotify'] ?? '') ?: ''),
+                            ];
+                        }
+                    }
+
+                    $nextCandidate = $pageResponse['data']['next'] ?? '';
+                    $nextUrl = is_string($nextCandidate) ? $nextCandidate : '';
+                    $pagesFetched++;
                 }
             }
         }
@@ -109,6 +126,7 @@ final class SpotifyAdapter extends BaseAdapter
                 'genres' => is_array($profileArtist['genres'] ?? null) ? $profileArtist['genres'] : [],
                 'popularity' => (int) ($profileArtist['popularity'] ?? 0),
                 'followers' => (int) (($profileArtist['followers']['total'] ?? 0) ?: 0),
+                'catalog_total' => $catalogTotal,
                 'images' => is_array($profileArtist['images'] ?? null) ? $profileArtist['images'] : [],
             ],
             'releases' => $releases,

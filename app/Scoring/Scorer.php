@@ -58,11 +58,11 @@ final class Scorer
             ];
         }
 
-        $bandbriefScore = (int) round($weightedSum);
-
         $identityConfidence = (float) ($metrics['identity_confidence'] ?? 0.0);
         $coverage = $this->coverageScore($availability);
         $sourceConfidence = (float) ($metrics['source_confidence_avg'] ?? 0.0);
+        $identityFactor = 0.62 + (max(0.0, min(1.0, $identityConfidence)) * 0.40);
+        $bandbriefScore = (int) round(max(0.0, min(100.0, $weightedSum * $identityFactor)));
 
         $confidence = round(
             ($identityConfidence * 0.55)
@@ -88,24 +88,24 @@ final class Scorer
      */
     private function scoreReach(array $metrics): array
     {
-        $followers = (int) ($metrics['spotify_followers'] ?? 0);
         $listeners = (int) ($metrics['lastfm_listeners'] ?? 0);
+        $spotifyCatalogTotal = (int) ($metrics['spotify_catalog_total'] ?? 0);
         $releaseDepth = (int) ($metrics['musicbrainz_release_groups_total'] ?? 0);
 
         $score = (int) round(min(
             100,
-            ($this->logScale($followers, 20_000_000) * 44)
-            + ($this->logScale($listeners, 20_000_000) * 42)
-            + ($this->logScale($releaseDepth, 250) * 14)
+            ($this->logScale($listeners, 20_000_000) * 56)
+            + ($this->logScale($releaseDepth, 900) * 28)
+            + ($this->logScale($spotifyCatalogTotal, 320) * 16)
         ));
 
         return [
             'score' => $score,
-            'explanation' => 'Combines Spotify followers, Last.fm listeners, and MusicBrainz catalog depth with log scaling to preserve variance for established artists.',
+            'explanation' => 'Combines audience scale with catalog depth across Last.fm, MusicBrainz, and Spotify release totals.',
             'inputs' => [
-                'spotify_followers' => $followers,
                 'lastfm_listeners' => $listeners,
                 'musicbrainz_release_groups_total' => $releaseDepth,
+                'spotify_catalog_total' => $spotifyCatalogTotal,
             ],
         ];
     }
@@ -120,13 +120,15 @@ final class Scorer
         $recentMentions = (int) ($metrics['reddit_mentions_90d'] ?? 0);
         $upvotes = (int) ($metrics['reddit_total_upvotes'] ?? 0);
         $releaseCoverage = (int) ($metrics['release_sources_covered'] ?? 0);
+        $pagesFetched = (int) ($metrics['reddit_pages_fetched'] ?? 0);
 
         $score = (int) round(min(
             100,
-            ($this->logScale($recentReleases, 20) * 46)
-            + ($this->logScale($recentMentions, 120) * 24)
-            + ($this->logScale($upvotes, 15_000) * 20)
-            + min(12, $releaseCoverage * 4)
+            ($this->logScale($recentReleases, 20) * 48)
+            + ($this->logScale($recentMentions, 140) * 22)
+            + ($this->logScale($upvotes, 20_000) * 20)
+            + min(6, $pagesFetched * 1.5)
+            + min(4, $releaseCoverage * 2)
         ));
 
         return [
@@ -136,6 +138,7 @@ final class Scorer
                 'releases_last_12m' => $recentReleases,
                 'reddit_mentions_90d' => $recentMentions,
                 'reddit_total_upvotes' => $upvotes,
+                'reddit_pages_fetched' => $pagesFetched,
                 'release_sources_covered' => $releaseCoverage,
             ],
         ];
@@ -147,22 +150,28 @@ final class Scorer
      */
     private function scoreEngagement(array $metrics): array
     {
-        $popularity = (int) ($metrics['spotify_popularity'] ?? 0);
         $upvotes = (int) ($metrics['reddit_total_upvotes'] ?? 0);
         $playcount = (int) ($metrics['lastfm_playcount'] ?? 0);
+        $mentions = max(1, (int) ($metrics['reddit_mentions_total'] ?? 0));
+        $subreddits = max(1, (int) ($metrics['reddit_subreddits_count'] ?? 0));
+        $discussionDepth = $upvotes / $mentions;
+        $communityBreadth = $mentions / $subreddits;
 
-        $upvoteNorm = $this->logScale($upvotes, 15_000) * 30;
-        $playcountNorm = $this->logScale($playcount, 50_000_000) * 20;
+        $upvoteNorm = $this->logScale($upvotes, 20_000) * 28;
+        $playcountNorm = $this->logScale($playcount, 5_000_000_000) * 48;
+        $discussionNorm = $this->logScale((int) round($discussionDepth * 100), 2_000) * 16;
+        $breadthNorm = $this->logScale((int) round($communityBreadth * 100), 1_500) * 8;
 
-        $score = (int) round(min(100, ($popularity * 0.5) + $upvoteNorm + $playcountNorm));
+        $score = (int) round(min(100, $upvoteNorm + $playcountNorm + $discussionNorm + $breadthNorm));
 
         return [
             'score' => $score,
-            'explanation' => 'Blends Spotify popularity with social upvotes and playcount scale to avoid over-rewarding only one platform.',
+            'explanation' => 'Blends social vote quality with Last.fm consumption scale and cross-community participation depth.',
             'inputs' => [
-                'spotify_popularity' => $popularity,
                 'reddit_total_upvotes' => $upvotes,
                 'lastfm_playcount' => $playcount,
+                'reddit_mentions_total' => $mentions,
+                'reddit_subreddits_count' => $subreddits,
             ],
         ];
     }
@@ -176,13 +185,14 @@ final class Scorer
         $totalReleases = (int) ($metrics['total_releases_seen'] ?? 0);
         $recentReleases = (int) ($metrics['releases_last_24m'] ?? 0);
         $mbReleaseGroups = (int) ($metrics['musicbrainz_release_groups_total'] ?? 0);
-        $releaseDepth = max($totalReleases, $mbReleaseGroups);
+        $spotifyCatalogTotal = (int) ($metrics['spotify_catalog_total'] ?? 0);
+        $releaseDepth = max($totalReleases, $mbReleaseGroups, $spotifyCatalogTotal);
 
         $score = (int) round(min(
             100,
-            ($this->logScale($recentReleases, 24) * 58)
-            + ($this->logScale($releaseDepth, 250) * 34)
-            + min(8, $recentReleases * 1.5)
+            ($this->logScale($recentReleases, 24) * 52)
+            + ($this->logScale($releaseDepth, 900) * 38)
+            + min(10, $recentReleases * 2)
         ));
 
         return [
@@ -192,6 +202,7 @@ final class Scorer
                 'total_releases_seen' => $totalReleases,
                 'releases_last_24m' => $recentReleases,
                 'musicbrainz_release_groups_total' => $mbReleaseGroups,
+                'spotify_catalog_total' => $spotifyCatalogTotal,
             ],
         ];
     }
@@ -206,13 +217,15 @@ final class Scorer
         $subreddits = (int) ($metrics['reddit_subreddits_count'] ?? 0);
         $tags = (int) ($metrics['lastfm_tags_count'] ?? 0);
         $upvotes = (int) ($metrics['reddit_total_upvotes'] ?? 0);
+        $pagesFetched = (int) ($metrics['reddit_pages_fetched'] ?? 0);
 
         $score = (int) round(min(
             100,
-            ($this->logScale($mentions, 180) * 34)
-            + ($this->logScale($subreddits, 55) * 31)
-            + ($this->logScale($tags, 45) * 20)
-            + ($this->logScale($upvotes, 20_000) * 15)
+            ($this->logScale($mentions, 140) * 34)
+            + ($this->logScale($subreddits, 80) * 29)
+            + ($this->logScale($upvotes, 40_000) * 25)
+            + ($this->logScale($tags, 60) * 8)
+            + min(4, $pagesFetched)
         ));
 
         return [
@@ -223,6 +236,7 @@ final class Scorer
                 'reddit_subreddits_count' => $subreddits,
                 'lastfm_tags_count' => $tags,
                 'reddit_total_upvotes' => $upvotes,
+                'reddit_pages_fetched' => $pagesFetched,
             ],
         ];
     }
@@ -236,6 +250,7 @@ final class Scorer
         $matchedSources = (int) ($metrics['matched_identity_sources'] ?? 0);
         $identitySourcesTotal = max(1, (int) ($metrics['identity_sources_total'] ?? 5));
         $identityConfidence = (float) ($metrics['identity_confidence'] ?? 0.0);
+        $identitySourceConfidence = (float) ($metrics['identity_source_confidence_avg'] ?? 0.0);
         $hasMusicbrainz = (int) (($metrics['has_musicbrainz'] ?? false) ? 1 : 0);
         $hasWikipedia = (int) (($metrics['has_wikipedia'] ?? false) ? 1 : 0);
         $hasWebsite = (int) (($metrics['has_official_website'] ?? false) ? 1 : 0);
@@ -244,11 +259,12 @@ final class Scorer
         $score = min(
             100,
             (int) round(
-                ($matchedRatio * 34)
-                + ($identityConfidence * 34)
-                + ($hasMusicbrainz * 12)
-                + ($hasWikipedia * 10)
-                + ($hasWebsite * 10)
+                ($matchedRatio * 40)
+                + ($identityConfidence * 30)
+                + ($identitySourceConfidence * 20)
+                + ($hasMusicbrainz * 3)
+                + ($hasWikipedia * 2)
+                + ($hasWebsite * 5)
             )
         );
 
@@ -259,6 +275,7 @@ final class Scorer
                 'matched_identity_sources' => $matchedSources,
                 'identity_sources_total' => $identitySourcesTotal,
                 'identity_confidence' => round($identityConfidence, 4),
+                'identity_source_confidence_avg' => round($identitySourceConfidence, 4),
                 'has_musicbrainz' => (bool) $hasMusicbrainz,
                 'has_wikipedia' => (bool) $hasWikipedia,
                 'has_official_website' => (bool) $hasWebsite,
