@@ -318,6 +318,21 @@ final class ReportService
             }
         }
 
+        $socialCandidates = [];
+        $musicbrainzUrls = $musicbrainzProfile['official_urls'] ?? [];
+        if (is_array($musicbrainzUrls)) {
+            foreach ($musicbrainzUrls as $url) {
+                $socialCandidates[] = (string) $url;
+            }
+        }
+        $socialCandidates[] = $officialWebsite;
+        $socialCandidates[] = (string) ($musicbrainzProfile['url'] ?? '');
+        $socialCandidates[] = (string) ($spotifyProfile['url'] ?? '');
+        $socialCandidates[] = (string) ($lastfmProfile['url'] ?? '');
+        $socialCandidates[] = (string) ($wikiProfile['url'] ?? '');
+        $socialCandidates[] = (string) ($bandcampProfile['url'] ?? '');
+        $socialProfiles = $this->extractSocialProfiles($socialCandidates);
+
         $platformPresence = [
             'musicbrainz' => [
                 'available' => $this->isAvailable($identitySources, 'musicbrainz'),
@@ -342,6 +357,18 @@ final class ReportService
             'reddit' => [
                 'available' => $this->isAvailable($signalSources, 'reddit'),
                 'url' => 'https://www.reddit.com/search/?q=' . rawurlencode($requestedName),
+            ],
+            'instagram' => [
+                'available' => $socialProfiles['instagram'] !== '',
+                'url' => $socialProfiles['instagram'],
+            ],
+            'soundcloud' => [
+                'available' => $socialProfiles['soundcloud'] !== '',
+                'url' => $socialProfiles['soundcloud'],
+            ],
+            'tiktok' => [
+                'available' => $socialProfiles['tiktok'] !== '',
+                'url' => $socialProfiles['tiktok'],
             ],
             'official_website' => [
                 'available' => $officialWebsite !== '',
@@ -462,6 +489,7 @@ final class ReportService
         }
 
         $sourceStatus = $this->buildSourceStatus($identitySources, $signalSources);
+        $sourceContent = $this->buildSourceContent($identitySources, $signalSources);
         $identityAvailableCount = $this->availableCount($identitySources);
         $signalAvailableCount = $this->availableCount($signalSources);
 
@@ -479,6 +507,7 @@ final class ReportService
                 'signal_sources' => $signalSources,
             ],
             'source_status' => $sourceStatus,
+            'source_content' => $sourceContent,
             'platform_presence' => $platformPresence,
             'releases' => $releases,
             'community_mentions' => array_slice($communityMentions, 0, 20),
@@ -489,6 +518,9 @@ final class ReportService
                 'wikipedia' => $this->isAvailable($identitySources, 'wikipedia'),
                 'bandcamp' => $this->isAvailable($identitySources, 'bandcamp'),
                 'reddit' => $this->isAvailable($signalSources, 'reddit'),
+                'instagram' => $socialProfiles['instagram'] !== '',
+                'soundcloud' => $socialProfiles['soundcloud'] !== '',
+                'tiktok' => $socialProfiles['tiktok'] !== '',
                 'official_website' => $officialWebsite !== '',
             ],
             'missing_data' => array_values(array_unique($missingData)),
@@ -522,6 +554,9 @@ final class ReportService
                 'has_wikipedia' => $this->isAvailable($identitySources, 'wikipedia'),
                 'has_official_website' => $officialWebsite !== '',
                 'has_bandcamp' => $this->isAvailable($identitySources, 'bandcamp'),
+                'has_instagram' => $socialProfiles['instagram'] !== '',
+                'has_soundcloud' => $socialProfiles['soundcloud'] !== '',
+                'has_tiktok' => $socialProfiles['tiktok'] !== '',
             ],
         ];
     }
@@ -674,6 +709,270 @@ final class ReportService
         $maxAge = (new DateTimeImmutable('now'))->sub(new DateInterval('PT12H'));
 
         return $created >= $maxAge;
+    }
+
+    /**
+     * @param array<string, array<string, mixed>> $identitySources
+     * @param array<string, array<string, mixed>> $signalSources
+     * @return array<string, array<string, mixed>>
+     */
+    private function buildSourceContent(array $identitySources, array $signalSources): array
+    {
+        $rows = [];
+        $sources = array_merge($identitySources, $signalSources);
+
+        foreach ($sources as $sourceName => $sourceData) {
+            $payload = $sourceData['payload'] ?? [];
+            if (!is_array($payload)) {
+                $payload = [];
+            }
+
+            $rows[(string) $sourceName] = [
+                'status' => (string) ($sourceData['status'] ?? 'error'),
+                'confidence' => (float) ($sourceData['confidence'] ?? 0.0),
+                'fetched_at' => (string) ($sourceData['fetched_at'] ?? ''),
+                'collection_method' => (string) ($sourceData['collection_method'] ?? 'unknown'),
+                'content' => $this->summarizeSourcePayload((string) $sourceName, $payload),
+            ];
+        }
+
+        return $rows;
+    }
+
+    /**
+     * @param array<string, mixed> $payload
+     * @return array<string, mixed>
+     */
+    private function summarizeSourcePayload(string $sourceName, array $payload): array
+    {
+        $profile = $payload['profile'] ?? [];
+        if (!is_array($profile)) {
+            $profile = [];
+        }
+
+        if ($sourceName === 'spotify') {
+            $genres = $profile['genres'] ?? [];
+            if (!is_array($genres)) {
+                $genres = [];
+            }
+
+            return [
+                'profile' => [
+                    'name' => (string) ($profile['name'] ?? ''),
+                    'url' => (string) ($profile['url'] ?? ''),
+                    'popularity' => (int) ($profile['popularity'] ?? 0),
+                    'followers' => (int) ($profile['followers'] ?? 0),
+                    'catalog_total' => (int) ($profile['catalog_total'] ?? 0),
+                    'genres' => array_values(array_slice($genres, 0, 8)),
+                ],
+                'releases' => $this->normalizeReleaseRows((array) ($payload['releases'] ?? []), 10),
+            ];
+        }
+
+        if ($sourceName === 'lastfm') {
+            $tags = $profile['tags'] ?? [];
+            if (!is_array($tags)) {
+                $tags = [];
+            }
+
+            return [
+                'profile' => [
+                    'name' => (string) ($profile['name'] ?? ''),
+                    'url' => (string) ($profile['url'] ?? ''),
+                    'listeners' => (int) ($profile['listeners'] ?? 0),
+                    'playcount' => (int) ($profile['playcount'] ?? 0),
+                    'summary' => $this->cleanSummary((string) ($profile['summary'] ?? ''), 900),
+                    'tags' => array_values(array_slice($tags, 0, 12)),
+                ],
+                'top_albums' => $this->normalizeReleaseRows((array) ($payload['releases'] ?? []), 10),
+            ];
+        }
+
+        if ($sourceName === 'wikipedia') {
+            return [
+                'profile' => [
+                    'name' => (string) ($profile['name'] ?? ''),
+                    'title' => (string) ($profile['title'] ?? ''),
+                    'description' => (string) ($profile['description'] ?? ''),
+                    'extract' => $this->cleanSummary((string) ($profile['extract'] ?? ''), 1800),
+                    'url' => (string) ($profile['url'] ?? ''),
+                    'wikidata_id' => (string) ($profile['wikidata_id'] ?? ''),
+                    'official_website' => (string) ($profile['official_website'] ?? ''),
+                ],
+            ];
+        }
+
+        if ($sourceName === 'musicbrainz') {
+            $aliases = $profile['aliases'] ?? [];
+            if (!is_array($aliases)) {
+                $aliases = [];
+            }
+
+            $officialUrls = $profile['official_urls'] ?? [];
+            if (!is_array($officialUrls)) {
+                $officialUrls = [];
+            }
+
+            return [
+                'profile' => [
+                    'name' => (string) ($profile['name'] ?? ''),
+                    'type' => (string) ($profile['type'] ?? ''),
+                    'country' => (string) ($profile['country'] ?? ''),
+                    'area' => (string) ($profile['area'] ?? ''),
+                    'url' => (string) ($profile['url'] ?? ''),
+                    'official_urls' => array_values(array_slice($officialUrls, 0, 15)),
+                    'aliases' => array_values(array_slice($aliases, 0, 15)),
+                    'release_groups_total' => (int) ($profile['release_groups_total'] ?? 0),
+                ],
+                'search_candidates' => array_values(array_slice((array) ($payload['search_candidates'] ?? []), 0, 5)),
+                'releases' => $this->normalizeReleaseRows((array) ($payload['releases'] ?? []), 10),
+            ];
+        }
+
+        if ($sourceName === 'reddit') {
+            $summary = $payload['summary'] ?? [];
+            if (!is_array($summary)) {
+                $summary = [];
+            }
+
+            return [
+                'summary' => [
+                    'mentions_count' => (int) (($summary['mentions_count'] ?? 0) ?: 0),
+                    'subreddits_count' => (int) (($summary['subreddits_count'] ?? 0) ?: 0),
+                    'total_upvotes' => (int) (($summary['total_upvotes'] ?? 0) ?: 0),
+                    'pages_fetched' => (int) (($summary['pages_fetched'] ?? 0) ?: 0),
+                ],
+                'recent_mentions' => $this->normalizeRedditMentions((array) ($payload['mentions'] ?? []), 10),
+            ];
+        }
+
+        if ($sourceName === 'bandcamp') {
+            return [
+                'profile' => [
+                    'name' => (string) ($profile['name'] ?? ''),
+                    'url' => (string) ($profile['url'] ?? ''),
+                ],
+            ];
+        }
+
+        return $payload;
+    }
+
+    /**
+     * @param array<int, mixed> $rows
+     * @return array<int, array<string, mixed>>
+     */
+    private function normalizeReleaseRows(array $rows, int $limit): array
+    {
+        $result = [];
+        foreach ($rows as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+
+            $result[] = [
+                'title' => (string) ($row['title'] ?? ''),
+                'release_date' => (string) ($row['release_date'] ?? ''),
+                'release_type' => (string) ($row['release_type'] ?? ''),
+                'playcount' => (int) (($row['playcount'] ?? 0) ?: 0),
+                'url' => (string) ($row['url'] ?? ''),
+            ];
+
+            if (count($result) >= $limit) {
+                break;
+            }
+        }
+
+        return $result;
+    }
+
+    /**
+     * @param array<int, mixed> $mentions
+     * @return array<int, array<string, mixed>>
+     */
+    private function normalizeRedditMentions(array $mentions, int $limit): array
+    {
+        $result = [];
+        foreach ($mentions as $mention) {
+            if (!is_array($mention)) {
+                continue;
+            }
+
+            $result[] = [
+                'title' => (string) ($mention['title'] ?? ''),
+                'subreddit' => (string) ($mention['subreddit'] ?? ''),
+                'score' => (int) (($mention['score'] ?? 0) ?: 0),
+                'num_comments' => (int) (($mention['num_comments'] ?? 0) ?: 0),
+                'created_utc' => (int) (($mention['created_utc'] ?? 0) ?: 0),
+                'url' => (string) ($mention['url'] ?? ''),
+            ];
+
+            if (count($result) >= $limit) {
+                break;
+            }
+        }
+
+        return $result;
+    }
+
+    private function cleanSummary(string $value, int $limit): string
+    {
+        $clean = trim(strip_tags($value));
+        if ($clean === '') {
+            return '';
+        }
+
+        return $this->truncateForDb($clean, $limit);
+    }
+
+    /**
+     * @param string[] $candidateUrls
+     * @return array{instagram: string, soundcloud: string, tiktok: string}
+     */
+    private function extractSocialProfiles(array $candidateUrls): array
+    {
+        $profiles = [
+            'instagram' => '',
+            'soundcloud' => '',
+            'tiktok' => '',
+        ];
+
+        foreach ($candidateUrls as $candidateUrl) {
+            $this->setSocialProfileFromUrl($profiles, (string) $candidateUrl);
+            if ($profiles['instagram'] !== '' && $profiles['soundcloud'] !== '' && $profiles['tiktok'] !== '') {
+                break;
+            }
+        }
+
+        return $profiles;
+    }
+
+    /**
+     * @param array{instagram: string, soundcloud: string, tiktok: string} $profiles
+     */
+    private function setSocialProfileFromUrl(array &$profiles, string $candidateUrl): void
+    {
+        $url = trim($candidateUrl);
+        if ($url === '') {
+            return;
+        }
+
+        $host = strtolower((string) (parse_url($url, PHP_URL_HOST) ?? ''));
+        if ($host === '') {
+            return;
+        }
+
+        if ($profiles['instagram'] === '' && str_contains($host, 'instagram.com')) {
+            $profiles['instagram'] = $url;
+        }
+
+        if ($profiles['soundcloud'] === '' && str_contains($host, 'soundcloud.com')) {
+            $profiles['soundcloud'] = $url;
+        }
+
+        if ($profiles['tiktok'] === '' && str_contains($host, 'tiktok.com')) {
+            $profiles['tiktok'] = $url;
+        }
     }
 
     /**

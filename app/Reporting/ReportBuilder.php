@@ -53,6 +53,11 @@ final class ReportBuilder
             $sourceStatus = [];
         }
 
+        $sourceContent = $normalized['source_content'] ?? [];
+        if (!is_array($sourceContent)) {
+            $sourceContent = [];
+        }
+
         $overviewSummary = $this->overviewSummary($profile, $identity, $metrics);
         $audienceSummary = $this->audienceSummary($metrics);
         $momentumSummary = $this->momentumSummary($metrics);
@@ -89,6 +94,16 @@ final class ReportBuilder
                     ),
                     'platforms' => $presence,
                     'source_status' => $sourceStatus,
+                ],
+            ],
+            [
+                'name' => 'Source Content',
+                'content' => [
+                    'summary' => sprintf(
+                        'Curated content snapshots from %d source(s).',
+                        count($sourceContent)
+                    ),
+                    'sources' => $sourceContent,
                 ],
             ],
             [
@@ -191,6 +206,7 @@ final class ReportBuilder
             'identity' => $identity,
             'platform_presence' => $presence,
             'source_status' => $sourceStatus,
+            'source_content' => $sourceContent,
             'releases' => $releases,
             'engagement' => [
                 'spotify_followers' => (int) ($metrics['spotify_followers'] ?? 0),

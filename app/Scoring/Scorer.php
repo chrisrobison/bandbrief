@@ -254,23 +254,29 @@ final class Scorer
         $hasMusicbrainz = (int) (($metrics['has_musicbrainz'] ?? false) ? 1 : 0);
         $hasWikipedia = (int) (($metrics['has_wikipedia'] ?? false) ? 1 : 0);
         $hasWebsite = (int) (($metrics['has_official_website'] ?? false) ? 1 : 0);
+        $hasInstagram = (int) (($metrics['has_instagram'] ?? false) ? 1 : 0);
+        $hasSoundcloud = (int) (($metrics['has_soundcloud'] ?? false) ? 1 : 0);
+        $hasTiktok = (int) (($metrics['has_tiktok'] ?? false) ? 1 : 0);
         $matchedRatio = min(1.0, max(0.0, $matchedSources / $identitySourcesTotal));
 
         $score = min(
             100,
             (int) round(
-                ($matchedRatio * 40)
-                + ($identityConfidence * 30)
-                + ($identitySourceConfidence * 20)
+                ($matchedRatio * 36)
+                + ($identityConfidence * 28)
+                + ($identitySourceConfidence * 18)
                 + ($hasMusicbrainz * 3)
                 + ($hasWikipedia * 2)
                 + ($hasWebsite * 5)
+                + ($hasInstagram * 3)
+                + ($hasSoundcloud * 3)
+                + ($hasTiktok * 2)
             )
         );
 
         return [
             'score' => $score,
-            'explanation' => 'Prioritizes identity agreement quality and stable cross-platform presence checks.',
+            'explanation' => 'Prioritizes identity agreement quality and stable cross-platform presence checks, including Instagram, SoundCloud, and TikTok availability when discovered.',
             'inputs' => [
                 'matched_identity_sources' => $matchedSources,
                 'identity_sources_total' => $identitySourcesTotal,
@@ -279,6 +285,9 @@ final class Scorer
                 'has_musicbrainz' => (bool) $hasMusicbrainz,
                 'has_wikipedia' => (bool) $hasWikipedia,
                 'has_official_website' => (bool) $hasWebsite,
+                'has_instagram' => (bool) $hasInstagram,
+                'has_soundcloud' => (bool) $hasSoundcloud,
+                'has_tiktok' => (bool) $hasTiktok,
             ],
         ];
     }
@@ -305,6 +314,7 @@ final class Scorer
 
         $identityKeys = ['musicbrainz', 'spotify', 'lastfm', 'wikipedia', 'bandcamp', 'official_website'];
         $signalKeys = ['reddit'];
+        $socialKeys = ['instagram', 'soundcloud', 'tiktok'];
 
         $identityAvailable = 0;
         $identityTotal = 0;
@@ -334,7 +344,21 @@ final class Scorer
 
         $identityRatio = $identityTotal > 0 ? ($identityAvailable / $identityTotal) : 0.0;
         $signalRatio = $signalTotal > 0 ? ($signalAvailable / $signalTotal) : 0.0;
+        $socialAvailable = 0;
+        $socialTotal = 0;
 
-        return round(($identityRatio * 0.75) + ($signalRatio * 0.25), 4);
+        foreach ($socialKeys as $key) {
+            if (!array_key_exists($key, $availability)) {
+                continue;
+            }
+            $socialTotal++;
+            if ((bool) $availability[$key]) {
+                $socialAvailable++;
+            }
+        }
+
+        $socialRatio = $socialTotal > 0 ? ($socialAvailable / $socialTotal) : 0.0;
+
+        return round(($identityRatio * 0.67) + ($signalRatio * 0.23) + ($socialRatio * 0.10), 4);
     }
 }

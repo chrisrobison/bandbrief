@@ -52,6 +52,7 @@ class BandReport extends HTMLElement {
       report.source_status ||
       meta?.source_status ||
       {};
+    const sourceContent = report.source_content || {};
 
     const releases = Array.isArray(report.releases) ? report.releases : [];
     const releaseRows = releases
@@ -135,6 +136,11 @@ class BandReport extends HTMLElement {
       </article>
 
       <article class="report-section">
+        <h3>Source Content</h3>
+        <div class="source-content-list">${this.renderSourceContentPanels(sourceContent, sourceStatus)}</div>
+      </article>
+
+      <article class="report-section">
         <h3>Releases</h3>
         <ul class="releases-list">${releaseRows || "<li class='muted'>No release data available.</li>"}</ul>
       </article>
@@ -184,6 +190,23 @@ class BandReport extends HTMLElement {
           display: inline-flex;
           align-items: center;
           gap: 0.3rem;
+        }
+        .source-content-list {
+          display: grid;
+          gap: 0.45rem;
+        }
+        .source-content-panel {
+          border: 1px solid #ddd6c9;
+          border-radius: 10px;
+          background: #f8f7f4;
+          padding: 0.4rem 0.55rem;
+        }
+        .source-content-panel > summary {
+          cursor: pointer;
+          font-size: 0.92rem;
+        }
+        .source-content-panel pre {
+          margin: 0.6rem 0 0;
         }
         .releases-list {
           list-style: none;
@@ -290,6 +313,48 @@ class BandReport extends HTMLElement {
         const cls = status === "ok" ? "status-ok" : status === "partial" ? "status-partial" : "status-error";
 
         return `<span class="badge source-badge ${cls}">${this.escape(source)} (${this.escape(role)}) • ${Math.round(confidence * 100)}% • ${this.escape(freshness)}</span>`;
+      })
+      .join("");
+  }
+
+  renderSourceContentPanels(sourceContent, sourceStatus) {
+    const contentMap = sourceContent && typeof sourceContent === "object" ? sourceContent : {};
+    const statusMap = sourceStatus && typeof sourceStatus === "object" ? sourceStatus : {};
+
+    const sources = Object.keys(contentMap).sort();
+    if (!sources.length) {
+      return "<span class='muted'>No source content available.</span>";
+    }
+
+    return sources
+      .map((source) => {
+        const contentRow = contentMap[source] && typeof contentMap[source] === "object" ? contentMap[source] : {};
+        const statusRow = statusMap[source] && typeof statusMap[source] === "object" ? statusMap[source] : {};
+
+        const status = String(contentRow.status || statusRow.status || "unknown");
+        const confidence = Number(contentRow.confidence ?? statusRow.confidence ?? 0);
+        const method = String(contentRow.collection_method || statusRow.collection_method || "");
+        const fetchedAt = String(contentRow.fetched_at || statusRow.fetched_at || "");
+        const freshness = fetchedAt ? this.freshnessLabel(fetchedAt) : "unknown freshness";
+
+        const payload =
+          contentRow.content && typeof contentRow.content === "object"
+            ? contentRow.content
+            : contentRow.payload && typeof contentRow.payload === "object"
+              ? contentRow.payload
+              : {};
+
+        const summaryParts = [`${status}`, `${Math.round(confidence * 100)}% confidence`, freshness];
+        if (method) {
+          summaryParts.push(method);
+        }
+
+        return `
+          <details class="source-content-panel">
+            <summary><strong>${this.escape(source)}</strong> • ${this.escape(summaryParts.join(" • "))}</summary>
+            <pre>${this.escape(JSON.stringify(payload, null, 2))}</pre>
+          </details>
+        `;
       })
       .join("");
   }
