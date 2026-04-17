@@ -373,6 +373,10 @@ final class ReportService
         if (!is_array($musicbrainzReleases)) {
             $musicbrainzReleases = [];
         }
+        $musicbrainzReleaseGroupsTotal = max(
+            count($musicbrainzReleases),
+            (int) (($musicbrainzProfile['release_groups_total'] ?? 0) ?: 0)
+        );
 
         $releases = $this->mergeReleases($spotifyReleases, $lastfmReleases, $musicbrainzReleases);
         $communityMentions = is_array($redditPayload['mentions'] ?? null) ? $redditPayload['mentions'] : [];
@@ -501,7 +505,7 @@ final class ReportService
                 'releases_last_12m' => $releasesLast12,
                 'releases_last_24m' => $releasesLast24,
                 'total_releases_seen' => count($releases),
-                'musicbrainz_release_groups_total' => count($musicbrainzReleases),
+                'musicbrainz_release_groups_total' => $musicbrainzReleaseGroupsTotal,
                 'release_sources_covered' => $this->countReleaseSources($releases),
                 'source_confidence_avg' => $this->average($identitySourceConfidences, $signalSourceConfidences),
                 'identity_source_confidence_avg' => $this->average($identitySourceConfidences),
@@ -717,7 +721,7 @@ final class ReportService
                 $communityStmt->bindValue(':artist_id', $artistId, \PDO::PARAM_INT);
                 $communityStmt->bindValue(':source', 'reddit', \PDO::PARAM_STR);
                 $communityStmt->bindValue(':external_id', (string) ($mention['id'] ?? ''), \PDO::PARAM_STR);
-                $communityStmt->bindValue(':title', (string) ($mention['title'] ?? ''), \PDO::PARAM_STR);
+                $communityStmt->bindValue(':title', $this->truncateForDb((string) ($mention['title'] ?? ''), 255), \PDO::PARAM_STR);
                 $communityStmt->bindValue(':url', (string) ($mention['url'] ?? ''), \PDO::PARAM_STR);
                 $communityStmt->bindValue(':score', (int) (($mention['score'] ?? 0) ?: 0), \PDO::PARAM_INT);
                 $communityStmt->bindValue(':comment_count', (int) (($mention['num_comments'] ?? 0) ?: 0), \PDO::PARAM_INT);
@@ -820,6 +824,27 @@ final class ReportService
         }
 
         return $rows;
+    }
+
+    private function truncateForDb(string $value, int $maxChars): string
+    {
+        if ($maxChars <= 0) {
+            return '';
+        }
+
+        if (function_exists('mb_strlen') && function_exists('mb_substr')) {
+            if (mb_strlen($value, 'UTF-8') <= $maxChars) {
+                return $value;
+            }
+
+            return mb_substr($value, 0, $maxChars, 'UTF-8');
+        }
+
+        if (strlen($value) <= $maxChars) {
+            return $value;
+        }
+
+        return substr($value, 0, $maxChars);
     }
 
     /**

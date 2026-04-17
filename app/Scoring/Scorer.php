@@ -94,14 +94,14 @@ final class Scorer
 
         $score = (int) round(min(
             100,
-            ($this->logScale($followers, 2_500_000) * 52)
-            + ($this->logScale($listeners, 2_500_000) * 40)
-            + min(8, $releaseDepth)
+            ($this->logScale($followers, 20_000_000) * 44)
+            + ($this->logScale($listeners, 20_000_000) * 42)
+            + ($this->logScale($releaseDepth, 250) * 14)
         ));
 
         return [
             'score' => $score,
-            'explanation' => 'Combines Spotify followers, Last.fm listeners, and a small baseline for catalog depth from MusicBrainz release groups.',
+            'explanation' => 'Combines Spotify followers, Last.fm listeners, and MusicBrainz catalog depth with log scaling to preserve variance for established artists.',
             'inputs' => [
                 'spotify_followers' => $followers,
                 'lastfm_listeners' => $listeners,
@@ -118,21 +118,24 @@ final class Scorer
     {
         $recentReleases = (int) ($metrics['releases_last_12m'] ?? 0);
         $recentMentions = (int) ($metrics['reddit_mentions_90d'] ?? 0);
+        $upvotes = (int) ($metrics['reddit_total_upvotes'] ?? 0);
         $releaseCoverage = (int) ($metrics['release_sources_covered'] ?? 0);
 
         $score = (int) round(min(
             100,
-            min(62, $recentReleases * 17)
-            + min(26, $recentMentions * 2)
+            ($this->logScale($recentReleases, 20) * 46)
+            + ($this->logScale($recentMentions, 120) * 24)
+            + ($this->logScale($upvotes, 15_000) * 20)
             + min(12, $releaseCoverage * 4)
         ));
 
         return [
             'score' => $score,
-            'explanation' => 'Looks at recent release cadence and recent community chatter, with a bonus when multiple release sources agree.',
+            'explanation' => 'Looks at recent release cadence and recent community activity, with an evidence bonus when multiple release sources agree.',
             'inputs' => [
                 'releases_last_12m' => $recentReleases,
                 'reddit_mentions_90d' => $recentMentions,
+                'reddit_total_upvotes' => $upvotes,
                 'release_sources_covered' => $releaseCoverage,
             ],
         ];
@@ -173,17 +176,18 @@ final class Scorer
         $totalReleases = (int) ($metrics['total_releases_seen'] ?? 0);
         $recentReleases = (int) ($metrics['releases_last_24m'] ?? 0);
         $mbReleaseGroups = (int) ($metrics['musicbrainz_release_groups_total'] ?? 0);
+        $releaseDepth = max($totalReleases, $mbReleaseGroups);
 
         $score = (int) round(min(
             100,
-            min(50, $recentReleases * 14)
-            + min(25, $totalReleases * 1.8)
-            + min(25, $mbReleaseGroups * 2.5)
+            ($this->logScale($recentReleases, 24) * 58)
+            + ($this->logScale($releaseDepth, 250) * 34)
+            + min(8, $recentReleases * 1.5)
         ));
 
         return [
             'score' => $score,
-            'explanation' => 'Uses recent output first, then total known catalog, plus MusicBrainz release-group confirmation for durable release activity.',
+            'explanation' => 'Prioritizes recent releases, then uses total catalog depth as a secondary stabilizer for sustained activity.',
             'inputs' => [
                 'total_releases_seen' => $totalReleases,
                 'releases_last_24m' => $recentReleases,
@@ -201,16 +205,24 @@ final class Scorer
         $mentions = (int) ($metrics['reddit_mentions_total'] ?? 0);
         $subreddits = (int) ($metrics['reddit_subreddits_count'] ?? 0);
         $tags = (int) ($metrics['lastfm_tags_count'] ?? 0);
+        $upvotes = (int) ($metrics['reddit_total_upvotes'] ?? 0);
 
-        $score = (int) round(min(100, ($mentions * 1.8) + ($subreddits * 6.5) + ($tags * 2.0)));
+        $score = (int) round(min(
+            100,
+            ($this->logScale($mentions, 180) * 34)
+            + ($this->logScale($subreddits, 55) * 31)
+            + ($this->logScale($tags, 45) * 20)
+            + ($this->logScale($upvotes, 20_000) * 15)
+        ));
 
         return [
             'score' => $score,
-            'explanation' => 'Measures breadth and volume of public discussion from Reddit plus Last.fm tagging context.',
+            'explanation' => 'Measures breadth and quality of public discussion from Reddit plus Last.fm tagging context without saturating on capped result windows.',
             'inputs' => [
                 'reddit_mentions_total' => $mentions,
                 'reddit_subreddits_count' => $subreddits,
                 'lastfm_tags_count' => $tags,
+                'reddit_total_upvotes' => $upvotes,
             ],
         ];
     }
@@ -222,19 +234,21 @@ final class Scorer
     private function scoreCredibilityPresence(array $metrics): array
     {
         $matchedSources = (int) ($metrics['matched_identity_sources'] ?? 0);
+        $identitySourcesTotal = max(1, (int) ($metrics['identity_sources_total'] ?? 5));
         $identityConfidence = (float) ($metrics['identity_confidence'] ?? 0.0);
         $hasMusicbrainz = (int) (($metrics['has_musicbrainz'] ?? false) ? 1 : 0);
         $hasWikipedia = (int) (($metrics['has_wikipedia'] ?? false) ? 1 : 0);
         $hasWebsite = (int) (($metrics['has_official_website'] ?? false) ? 1 : 0);
+        $matchedRatio = min(1.0, max(0.0, $matchedSources / $identitySourcesTotal));
 
         $score = min(
             100,
             (int) round(
-                ($matchedSources * 14)
+                ($matchedRatio * 34)
                 + ($identityConfidence * 34)
-                + ($hasMusicbrainz * 16)
-                + ($hasWikipedia * 15)
-                + ($hasWebsite * 21)
+                + ($hasMusicbrainz * 12)
+                + ($hasWikipedia * 10)
+                + ($hasWebsite * 10)
             )
         );
 
@@ -243,6 +257,7 @@ final class Scorer
             'explanation' => 'Prioritizes identity agreement quality and stable cross-platform presence checks.',
             'inputs' => [
                 'matched_identity_sources' => $matchedSources,
+                'identity_sources_total' => $identitySourcesTotal,
                 'identity_confidence' => round($identityConfidence, 4),
                 'has_musicbrainz' => (bool) $hasMusicbrainz,
                 'has_wikipedia' => (bool) $hasWikipedia,

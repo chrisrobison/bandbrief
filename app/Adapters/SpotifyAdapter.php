@@ -67,9 +67,16 @@ final class SpotifyAdapter extends BaseAdapter
         }
 
         $artistId = (string) ($artist['id'] ?? '');
+        $profileArtist = $artist;
         $releases = [];
 
         if ($artistId !== '') {
+            $detailUrl = 'https://api.spotify.com/v1/artists/' . rawurlencode($artistId);
+            $detailResponse = $this->http->getJson($detailUrl, ['Authorization' => 'Bearer ' . $token]);
+            if ($detailResponse['ok'] && is_array($detailResponse['data'] ?? null)) {
+                $profileArtist = $detailResponse['data'];
+            }
+
             $releasesUrl = 'https://api.spotify.com/v1/artists/' . rawurlencode($artistId) . '/albums?include_groups=album,single&limit=20';
             $releasesResponse = $this->http->getJson($releasesUrl, ['Authorization' => 'Bearer ' . $token]);
             if ($releasesResponse['ok']) {
@@ -91,18 +98,18 @@ final class SpotifyAdapter extends BaseAdapter
             }
         }
 
-        $name = (string) ($artist['name'] ?? '');
+        $name = (string) (($profileArtist['name'] ?? $artist['name']) ?? '');
         $confidence = $this->similarity($artistName, $name);
 
         return $this->success('official_api', $confidence, [
             'profile' => [
                 'external_id' => $artistId,
                 'name' => $name,
-                'url' => (string) (($artist['external_urls']['spotify'] ?? '') ?: ''),
-                'genres' => is_array($artist['genres'] ?? null) ? $artist['genres'] : [],
-                'popularity' => (int) ($artist['popularity'] ?? 0),
-                'followers' => (int) (($artist['followers']['total'] ?? 0) ?: 0),
-                'images' => is_array($artist['images'] ?? null) ? $artist['images'] : [],
+                'url' => (string) (($profileArtist['external_urls']['spotify'] ?? $artist['external_urls']['spotify'] ?? '') ?: ''),
+                'genres' => is_array($profileArtist['genres'] ?? null) ? $profileArtist['genres'] : [],
+                'popularity' => (int) ($profileArtist['popularity'] ?? 0),
+                'followers' => (int) (($profileArtist['followers']['total'] ?? 0) ?: 0),
+                'images' => is_array($profileArtist['images'] ?? null) ? $profileArtist['images'] : [],
             ],
             'releases' => $releases,
         ]);

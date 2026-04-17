@@ -101,7 +101,8 @@ final class MusicbrainzAdapter extends BaseAdapter
         }
 
         $releaseErrors = [];
-        $releases = $this->fetchReleaseGroups($artistId, $headers, $releaseErrors);
+        $releaseGroupsTotal = 0;
+        $releases = $this->fetchReleaseGroups($artistId, $headers, $releaseErrors, $releaseGroupsTotal);
 
         $aliases = $this->extractAliases($artist);
         $profileName = trim((string) ($artist['name'] ?? (string) ($top['name'] ?? $query)));
@@ -125,6 +126,7 @@ final class MusicbrainzAdapter extends BaseAdapter
                 'url' => 'https://musicbrainz.org/artist/' . rawurlencode($artistId),
                 'official_urls' => $officialUrls,
                 'aliases' => $aliases,
+                'release_groups_total' => $releaseGroupsTotal,
             ],
             'aliases' => $aliases,
             'releases' => $releases,
@@ -317,8 +319,9 @@ final class MusicbrainzAdapter extends BaseAdapter
      * @param string[] $errors
      * @return array<int, array<string, mixed>>
      */
-    private function fetchReleaseGroups(string $artistId, array $headers, array &$errors): array
+    private function fetchReleaseGroups(string $artistId, array $headers, array &$errors, int &$releaseGroupsTotal): array
     {
+        $releaseGroupsTotal = 0;
         $url = self::API_BASE . '/release-group?fmt=json&artist=' . rawurlencode($artistId) . '&limit=12&offset=0&type=album|ep|single';
         $response = $this->requestJson($url, $headers);
 
@@ -328,6 +331,7 @@ final class MusicbrainzAdapter extends BaseAdapter
         }
 
         $groups = $response['data']['release-groups'] ?? [];
+        $releaseGroupsTotal = (int) (($response['data']['release-group-count'] ?? 0) ?: 0);
         if (!is_array($groups)) {
             return [];
         }
@@ -358,6 +362,10 @@ final class MusicbrainzAdapter extends BaseAdapter
             $rows,
             static fn(array $a, array $b): int => strcmp((string) ($b['release_date'] ?? ''), (string) ($a['release_date'] ?? ''))
         );
+
+        if ($releaseGroupsTotal <= 0) {
+            $releaseGroupsTotal = count($rows);
+        }
 
         return array_slice($rows, 0, 12);
     }
